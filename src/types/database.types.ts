@@ -1,6 +1,7 @@
 export type Profile = {
   id: string; // uuid
-  name: 'Elizabeth' | 'Martin';
+  name: 'Liz' | 'Martin';
+  push_token?: string | null;
   created_at: string; // ISO DB string
 };
 
@@ -28,13 +29,10 @@ export type Task = {
 };
 
 export type TaskWithDetails = Task & {
-  task_types: {
-    name: string;
-    default_points: number;
-  };
-  profiles: {
-    name: string;
-  } | null; // completed_by
+  task_types: { name: string; default_points: number } | null;
+  profiles: { name: string } | null;
+  creator?: { name: string } | null;
+  completer?: { name: string } | null;
 };
 
 export type WeeklyPointsView = {

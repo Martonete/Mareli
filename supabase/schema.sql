@@ -5,7 +5,8 @@
 -- 1. Profiles
 CREATE TABLE IF NOT EXISTS public.profiles (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  name text NOT NULL UNIQUE CHECK (name IN ('Elizabeth', 'Martin')),
+  name text NOT NULL UNIQUE CHECK (name IN ('Elizabeth', 'Martin', 'Liz')),
+  push_token text,
   created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -144,6 +145,28 @@ ALTER TABLE public.household_settings ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow all operations for everyone" ON public.household_settings FOR ALL USING (true);
 
 
+-- 11. Rewards (Catálogo de premios)
+CREATE TABLE IF NOT EXISTS public.rewards (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  name text NOT NULL,
+  points_cost integer NOT NULL DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+ALTER TABLE public.rewards ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all operations for everyone" ON public.rewards FOR ALL USING (true);
+
+-- 12. Reward Redemptions (Historial de canjes)
+CREATE TABLE IF NOT EXISTS public.reward_redemptions (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  profile_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  reward_id uuid NOT NULL REFERENCES public.rewards(id) ON DELETE CASCADE,
+  points_cost integer NOT NULL,
+  created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+ALTER TABLE public.reward_redemptions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all operations for everyone" ON public.reward_redemptions FOR ALL USING (true);
+
+
 -- ==============================================================================
 -- SEEDS INICIALES
 -- ==============================================================================
@@ -156,19 +179,32 @@ ON CONFLICT (name) DO NOTHING;
 
 -- Task Types (Lista predefinida requerida)
 INSERT INTO public.task_types (name, default_points) VALUES 
-  ('Compras', 5),
-  ('Limpieza baño', 15),
-  ('Lavar platos', 10),
+  ('Barrer pisos', 5),
+  ('Trapear', 8),
+  ('Ordenar habitación', 8),
   ('Cocinar', 15),
-  ('Ordenar habitación', 10),
+  ('Lavar platos', 15),
+  ('Limpiar baño', 25),
+  ('Limpiar ambiente', 20),
+  ('Limpiar casa', 60),
+  ('Lavar ropa', 5),
+  ('Colgar ropa', 10),
+  ('Doblar ropa', 15),
   ('Sacar basura', 5),
-  ('Pasear a Tony', 10),
-  ('Limpiar cocina', 15),
-  ('Barrer', 10),
-  ('Trapear', 15)
-ON CONFLICT (name) DO NOTHING;
+  ('Hacer compras', 10),
+  ('Pasear a Tony', 10)
+ON CONFLICT (name) DO UPDATE SET default_points = EXCLUDED.default_points;
 
--- Settings (Premios Base en JSON array)
-INSERT INTO public.household_settings (setting_key, setting_value) VALUES 
-  ('base_rewards', '["Elegir cena", "Salida elegida por el ganador", "Masaje", "Desayuno especial", "Merienda especial"]')
-ON CONFLICT (setting_key) DO NOTHING;
+-- Rewards (Premios iniciales)
+INSERT INTO public.rewards (name, points_cost) VALUES 
+  ('Elegir la película/serie', 20),
+  ('Merienda', 25),
+  ('Desayuno en la cama', 35),
+  ('Postre sorpresa', 35),
+  ('Elegís la música todo el día', 30),
+  ('Paseo sorpresa', 50),
+  ('Noche de cine', 60),
+  ('Noche de bar / tragos', 80),
+  ('Masajes', 90),
+  ('Oral', 110),
+  ('Soy tu esclavo/a', 160);
