@@ -295,29 +295,26 @@ export default function TasksScreen() {
       </View>
 
       {/* Filters */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filters}
-      >
+      <View style={styles.filters}>
         {FILTERS.map(f => {
           const count = f.key === 'all' ? tasks.length : tasks.filter(t => t.status === f.key).length;
+          const active = filter === f.key;
           return (
             <TouchableOpacity
               key={f.key}
-              style={[styles.filterChip, filter === f.key && { backgroundColor: profileColor, borderColor: profileColor }]}
+              style={[styles.filterChip, active && { backgroundColor: profileColor, borderColor: profileColor }]}
               onPress={() => setFilter(f.key)}
             >
-              <Text style={[styles.filterText, filter === f.key && styles.filterTextActive]}>
+              <Text style={[styles.filterText, active && styles.filterTextActive]}>
                 {f.label}
               </Text>
-              <Text style={[styles.filterCount, filter === f.key && styles.filterCountActive]}>
+              <Text style={[styles.filterCount, active && styles.filterCountActive]}>
                 {count}
               </Text>
             </TouchableOpacity>
           );
         })}
-      </ScrollView>
+      </View>
 
       {/* Stats bar */}
       <View style={styles.stats}>
@@ -509,20 +506,20 @@ const styles = StyleSheet.create({
     shadowColor: theme.colors.primary,
     shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 4,
   },
-  filters: { paddingHorizontal: 20, paddingBottom: 12, gap: 8 },
+  filters: { flexDirection: 'row', paddingHorizontal: 20, paddingBottom: 12, gap: 8 },
   filterChip: {
-    minWidth: 90,
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderRadius: 16, borderWidth: 1.5, borderColor: 'rgba(139,69,19,0.12)',
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 14, borderWidth: 1.5, borderColor: 'rgba(139,69,19,0.12)',
     backgroundColor: '#FFF',
-    flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0,
+    alignItems: 'center', justifyContent: 'center',
   },
   filterChipActive: { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
-  filterText: { fontSize: 12, fontWeight: '600', color: theme.colors.textSecondary, marginBottom: 2 },
+  filterText: { fontSize: 12, fontWeight: '600', color: theme.colors.textSecondary },
   filterTextActive: { color: '#FFF' },
   filterBadge: {},
   filterBadgeActive: {},
-  filterCount: { fontSize: 22, color: theme.colors.textSecondary, fontWeight: '900', lineHeight: 26 },
+  filterCount: { fontSize: 22, color: theme.colors.textSecondary, fontWeight: '900', lineHeight: 28, marginTop: 2 },
   filterCountActive: { color: '#FFF' },
   stats: { paddingHorizontal: 20, paddingBottom: 8 },
   statsText: { fontSize: 12, color: theme.colors.textSecondary, fontWeight: '500' },
