@@ -77,6 +77,7 @@ export default function TasksScreen() {
       { name: 'Ordenar habitación', default_points: 8 },
       { name: 'Cocinar', default_points: 15 },
       { name: 'Lavar platos', default_points: 15 },
+      { name: 'Limpiar', default_points: 15 },
       { name: 'Limpiar baño', default_points: 25 },
       { name: 'Limpiar ambiente', default_points: 20 },
       { name: 'Limpiar casa', default_points: 60 },

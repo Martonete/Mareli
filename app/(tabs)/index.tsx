@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, RefreshControl,
   TouchableOpacity, Platform, StatusBar, Modal, TextInput, Alert
@@ -12,8 +12,31 @@ import {
 } from 'lucide-react-native';
 import { format, parseISO, addDays, formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { notifyOtherUser } from '../../src/lib/notifications';
+import Svg, { Circle } from 'react-native-svg';
+
+const CircularProgress = ({ value, max, color, size = 88, strokeWidth = 7 }: {
+  value: number; max: number; color: string; size?: number; strokeWidth?: number;
+}) => {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const progress = max > 0 ? Math.min(Math.max(value / max, 0), 1) : 0;
+  const center = size / 2;
+  return (
+    <Svg width={size} height={size}>
+      <Circle cx={center} cy={center} r={radius} stroke="rgba(139,69,19,0.1)" strokeWidth={strokeWidth} fill="none" />
+      <Circle
+        cx={center} cy={center} r={radius}
+        stroke={color} strokeWidth={strokeWidth} fill="none"
+        strokeDasharray={circumference}
+        strokeDashoffset={circumference * (1 - progress)}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${center} ${center})`}
+      />
+    </Svg>
+  );
+};
 
 const parseNoteContent = (raw: string): { current: string; history: string[] } => {
   try {
@@ -47,6 +70,9 @@ const NoteCard = ({ note, onEdit }: { note: any; onEdit: (note: any) => void }) 
 export default function DashboardScreen() {
   const { activeProfile } = useProfileStore();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const scrollViewRef = useRef<ScrollView>(null);
+  const [notesY, setNotesY] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [recentTasks, setRecentTasks] = useState<any[]>([]);
   const [pendingShopping, setPendingShopping] = useState<any[]>([]);
@@ -198,6 +224,7 @@ export default function DashboardScreen() {
 
   return (
     <ScrollView
+      ref={scrollViewRef}
       style={styles.container}
       contentContainerStyle={[styles.content, { paddingTop: topPadding, paddingBottom: insets.bottom + 80 }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
@@ -216,56 +243,60 @@ export default function DashboardScreen() {
 
       {/* Grid de resumen */}
       <View style={styles.grid}>
-        <View style={styles.gridCard}>
+        <TouchableOpacity style={styles.gridCard} onPress={() => router.push('/(tabs)/tasks')} activeOpacity={0.75}>
           <View style={[styles.gridIconBg, { backgroundColor: 'rgba(139, 69, 19, 0.12)' }]}>
-            <Bell size={18} color={theme.colors.primary} />
+            <Bell size={20} color={theme.colors.primary} />
           </View>
           <Text style={styles.gridNum}>{recentTasks.length}</Text>
           <Text style={styles.gridLabel}>Tareas{'\n'}pendientes</Text>
-        </View>
+        </TouchableOpacity>
 
-        <View style={styles.gridCard}>
+        <TouchableOpacity style={styles.gridCard} onPress={() => router.push('/(tabs)/shopping')} activeOpacity={0.75}>
           <View style={[styles.gridIconBg, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
-            <ShoppingCart size={18} color="#10B981" />
+            <ShoppingCart size={20} color="#10B981" />
           </View>
           <Text style={[styles.gridNum, { color: '#10B981' }]}>{pendingShopping.length}</Text>
           <Text style={styles.gridLabel}>Artículos{'\n'}de compra</Text>
-        </View>
+        </TouchableOpacity>
 
-        <View style={styles.gridCard}>
+        <TouchableOpacity style={styles.gridCard} onPress={() => scrollViewRef.current?.scrollTo({ y: notesY - 16, animated: true })} activeOpacity={0.75}>
           <View style={[styles.gridIconBg, { backgroundColor: 'rgba(245, 158, 11, 0.12)' }]}>
-            <FileText size={18} color="#F59E0B" />
+            <FileText size={20} color="#F59E0B" />
           </View>
           <Text style={[styles.gridNum, { color: '#F59E0B' }]}>{recentNotes.length}</Text>
           <Text style={styles.gridLabel}>Notas{'\n'}recientes</Text>
-        </View>
+        </TouchableOpacity>
       </View>
 
       {/* Resumen Puntos */}
       <View style={styles.pointsSummary}>
-        <View style={styles.pointsHeader}>
-          <Text style={styles.pointsTitle}>Saldo de Puntos</Text>
-        </View>
-        <View style={styles.pointsBars}>
-          <View style={styles.pointRow}>
-            <Text style={styles.pointLabel}>Liz: {points.Liz}</Text>
-            <View style={styles.miniBarBg}>
-              <View style={[styles.miniBarFill, { width: `${Math.round((points.Liz / Math.max(points.Liz, points.Martin, 1)) * 100)}%` as any, backgroundColor: '#F472B6' }]} />
-            </View>
-          </View>
-          <View style={styles.pointRow}>
-            <Text style={styles.pointLabel}>Martín: {points.Martin}</Text>
-            <View style={styles.miniBarBg}>
-              <View style={[styles.miniBarFill, { width: `${Math.round((points.Martin / Math.max(points.Liz, points.Martin, 1)) * 100)}%` as any, backgroundColor: '#60A5FA' }]} />
-            </View>
-          </View>
+        <Text style={styles.pointsTitle}>Saldo de Puntos</Text>
+        <View style={styles.pointsCirclesRow}>
+          {([
+            { name: 'Liz', pts: points.Liz, color: '#F472B6' },
+            { name: 'Martín', pts: points.Martin, color: '#60A5FA' },
+          ] as const).map(({ name, pts, color }) => {
+            const maxPts = Math.max(points.Liz, points.Martin, 1);
+            return (
+              <View key={name} style={styles.pointsCircleWrapper}>
+                <View style={styles.pointsCircleContainer}>
+                  <CircularProgress value={pts} max={maxPts} color={color} size={92} strokeWidth={7} />
+                  <View style={styles.pointsCircleInner}>
+                    <Text style={[styles.pointsCircleNum, { color }]}>{pts}</Text>
+                    <Text style={styles.pointsCirclePts}>pts</Text>
+                  </View>
+                </View>
+                <Text style={styles.pointsCircleName}>{name}</Text>
+              </View>
+            );
+          })}
         </View>
       </View>
 
       {/* Secciones dinámicas - ordenadas por actividad más reciente */}
       {dynamicSections.map(({ key }) => {
         if (key === 'notes') return (
-          <View key="notes" style={styles.section}>
+          <View key="notes" style={styles.section} onLayout={(e) => setNotesY(e.nativeEvent.layout.y)}>
             <View style={[styles.sectionHeader, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
               <Text style={styles.sectionTitle}>Notas Recientes</Text>
               <TouchableOpacity onPress={() => setIsNoteModalVisible(true)} style={{ padding: 4, marginRight: -4 }}>
@@ -461,30 +492,33 @@ const styles = StyleSheet.create({
   gridCard: {
     flex: 1,
     backgroundColor: '#FFF',
-    borderRadius: 16,
-    padding: 14,
+    borderRadius: 18,
+    paddingVertical: 18,
+    paddingHorizontal: 8,
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(139, 69, 19, 0.1)',
     shadowColor: '#8B4513',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 3,
   },
   gridIconBg: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
   },
   gridNum: {
-    fontSize: 28,
+    fontSize: 36,
     fontWeight: '800',
     color: theme.colors.primary,
     letterSpacing: -1,
-    lineHeight: 32,
+    lineHeight: 40,
+    textAlign: 'center',
   },
   gridLabel: {
     fontSize: 11,
@@ -492,6 +526,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginTop: 4,
     lineHeight: 15,
+    textAlign: 'center',
   },
   section: {
     marginBottom: 20,
@@ -595,17 +630,19 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   pointsSummary: {
-    marginBottom: 24, padding: 16, backgroundColor: '#FFF', borderRadius: 16,
+    marginBottom: 24, paddingVertical: 20, paddingHorizontal: 16, backgroundColor: '#FFF', borderRadius: 18,
     borderWidth: 1, borderColor: 'rgba(139, 69, 19, 0.08)',
-    shadowColor: '#8B4513', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 1,
+    shadowColor: '#8B4513', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.07, shadowRadius: 10, elevation: 2,
+    alignItems: 'center',
   },
-  pointsHeader: { marginBottom: 12 },
-  pointsTitle: { fontSize: 16, fontWeight: '700', color: theme.colors.text },
-  pointsBars: { gap: 12 },
-  pointRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  pointLabel: { width: 75, fontSize: 13, fontWeight: '600', color: theme.colors.textSecondary },
-  miniBarBg: { flex: 1, height: 8, backgroundColor: 'rgba(139,69,19,0.06)', borderRadius: 4, overflow: 'hidden' },
-  miniBarFill: { height: '100%', borderRadius: 4 },
+  pointsTitle: { fontSize: 15, fontWeight: '700', color: theme.colors.text, marginBottom: 16, alignSelf: 'flex-start' },
+  pointsCirclesRow: { flexDirection: 'row', justifyContent: 'space-around', width: '100%' },
+  pointsCircleWrapper: { alignItems: 'center', gap: 8 },
+  pointsCircleContainer: { width: 92, height: 92, alignItems: 'center', justifyContent: 'center' },
+  pointsCircleInner: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
+  pointsCircleNum: { fontSize: 24, fontWeight: '800', letterSpacing: -1, lineHeight: 26 },
+  pointsCirclePts: { fontSize: 11, color: theme.colors.textSecondary, fontWeight: '600', marginTop: -2 },
+  pointsCircleName: { fontSize: 13, fontWeight: '600', color: theme.colors.text },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
   modal: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '80%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },

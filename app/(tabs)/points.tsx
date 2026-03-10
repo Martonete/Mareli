@@ -3,6 +3,7 @@ import { useFocusEffect } from 'expo-router';
 import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, Alert } from 'react-native';
 import { theme } from '../../src/constants/theme';
 import { supabase } from '../../src/lib/supabase';
+import Svg, { Circle } from 'react-native-svg';
 import { Gift, Star, Sparkles } from 'lucide-react-native';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -192,10 +193,23 @@ export default function PointsScreen() {
     >
       {/* Header Mis Puntos */}
       <View style={styles.header}>
-        <View style={styles.balanceCircle}>
-          <Text style={styles.balanceLabel}>Tu Saldo</Text>
-          <Text style={styles.balanceAmount}>{myBalance}</Text>
-          <Text style={styles.balancePts}>puntos</Text>
+        <View style={styles.balanceRingWrapper}>
+          <Svg width={184} height={184} style={styles.balanceRingSvg}>
+            <Circle cx={92} cy={92} r={88} stroke="rgba(255,255,255,0.18)" strokeWidth={8} fill="none" />
+            <Circle
+              cx={92} cy={92} r={88}
+              stroke="rgba(255,255,255,0.9)" strokeWidth={8} fill="none"
+              strokeDasharray={2 * Math.PI * 88}
+              strokeDashoffset={2 * Math.PI * 88 * (1 - Math.min(myBalance / Math.max(myBalance + (activeProfile?.name === 'Liz' ? balances.Martin : balances.Liz), 1), 1))}
+              strokeLinecap="round"
+              transform="rotate(-90 92 92)"
+            />
+          </Svg>
+          <View style={styles.balanceCircle}>
+            <Text style={styles.balanceLabel}>Tu Saldo</Text>
+            <Text style={styles.balanceAmount}>{myBalance}</Text>
+            <Text style={styles.balancePts}>puntos</Text>
+          </View>
         </View>
       </View>
 
@@ -292,6 +306,8 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 20 },
   
   header: { alignItems: 'center', marginBottom: 24, marginTop: 16 },
+  balanceRingWrapper: { width: 184, height: 184, alignItems: 'center', justifyContent: 'center' },
+  balanceRingSvg: { position: 'absolute' },
   balanceCircle: {
     width: 160, height: 160, borderRadius: 80,
     backgroundColor: theme.colors.primary,
