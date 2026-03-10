@@ -28,7 +28,7 @@
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro",
-      "output": "static",
+      "output": "single",
       "name": "Casa en Orden",
       "shortName": "CasaEnOrden",
       "display": "standalone",
