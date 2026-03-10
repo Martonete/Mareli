@@ -365,7 +365,7 @@ export default function DashboardScreen() {
                     <Text style={styles.listItemText} numberOfLines={1}>
                       <Text style={{ fontWeight: '700' }}>{red.profiles?.name}</Text>
                       {' canjeó '}
-                      <Text style={{ fontStyle: 'italic' }}>{red.rewards?.name ?? '?'}</Text>
+                      <Text style={styles.redemptionReward}>🎁 {red.rewards?.name ?? '?'}</Text>
                     </Text>
                     <View style={{ flexDirection: 'row', gap: 8, marginTop: 2 }}>
                       <Text style={{ fontSize: 11, color: theme.colors.primary, fontWeight: '700' }}>-{red.points_cost} pts</Text>
@@ -616,4 +616,5 @@ const styles = StyleSheet.create({
   saveBtn: { backgroundColor: theme.colors.primary, borderRadius: 14, paddingVertical: 16, alignItems: 'center', shadowColor: theme.colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
   saveBtnDisabled: { opacity: 0.5 },
   saveBtnText: { fontSize: 16, fontWeight: '700', color: '#FFF' },
+  redemptionReward: { fontStyle: 'italic', fontWeight: '600', color: '#7C3AED' },
 });

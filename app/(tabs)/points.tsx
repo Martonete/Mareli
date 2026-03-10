@@ -270,7 +270,7 @@ export default function PointsScreen() {
                     <Text style={styles.historyText}>
                       <Text style={[styles.historyName, { color: nameColor }]}>{red.profiles?.name}</Text>
                       {' canjeó '}
-                      <Text style={styles.historyReward}>{red.rewards?.name ?? '?'}</Text>
+                      <Text style={styles.historyReward}>🎁 {red.rewards?.name ?? '?'}</Text>
                     </Text>
                     <View style={styles.historyMeta}>
                       <Text style={styles.historyPts}>-{red.points_cost} pts</Text>
@@ -343,7 +343,6 @@ const styles = StyleSheet.create({
   redeemText: { color: '#FFF', fontWeight: '700', fontSize: 14 },
   redeemTextDisabled: { color: theme.colors.textSecondary },
 
-  historyTitle: { fontSize: 16, fontWeight: '700', color: theme.colors.textSecondary },
   historyCard: {
     backgroundColor: '#FFF', borderRadius: 16, overflow: 'hidden',
     borderWidth: 1, borderColor: 'rgba(139,69,19,0.06)',
@@ -355,7 +354,7 @@ const styles = StyleSheet.create({
   historyInfo: { flex: 1 },
   historyText: { fontSize: 14, color: '#444', lineHeight: 20 },
   historyName: { fontWeight: '700', fontSize: 14 },
-  historyReward: { fontStyle: 'italic', fontSize: 14 },
+  historyReward: { fontStyle: 'italic', fontWeight: '600', fontSize: 14, color: '#7C3AED' },
   historyMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
   historyPts: { fontSize: 12, fontWeight: '700', color: '#E53E3E', backgroundColor: '#FFF5F5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   historyTime: { fontSize: 12, color: theme.colors.textSecondary },
