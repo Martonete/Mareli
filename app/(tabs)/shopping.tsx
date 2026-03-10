@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity,
+  View, Text, StyleSheet, SectionList, TouchableOpacity,
   TextInput, Alert, RefreshControl, Modal,
 } from 'react-native';
 import { useProfileStore } from '../../src/store/useProfileStore';
 import { theme } from '../../src/constants/theme';
 import { supabase } from '../../src/lib/supabase';
 import { ShoppingItem } from '../../src/types/database.types';
-import { Plus, Check, ShoppingCart, X } from 'lucide-react-native';
+import { Plus, Check, ShoppingCart, X, Trash2, ChevronDown, ChevronUp } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { notifyOtherUser } from '../../src/lib/notifications';
 
@@ -19,12 +19,12 @@ export default function ShoppingScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<ShoppingItem | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [boughtCollapsed, setBoughtCollapsed] = useState(false);
 
   const fetchItems = async () => {
     const { data } = await supabase
       .from('shopping_items')
       .select('*, profiles!shopping_items_created_by_profile_id_fkey(name)')
-      .order('status', { ascending: false })
       .order('created_at', { ascending: false });
     if (data) setItems(data as any[]);
   };
@@ -83,6 +83,14 @@ export default function ShoppingScreen() {
     }
   };
 
+  const pending = items.filter(i => i.status !== 'resolved');
+  const resolved = items.filter(i => i.status === 'resolved');
+
+  const sections = [
+    ...(pending.length > 0 ? [{ key: 'pending', title: `Por comprar (${pending.length})`, data: pending }] : []),
+    ...(resolved.length > 0 ? [{ key: 'resolved', title: `Comprados (${resolved.length})`, data: boughtCollapsed ? [] : resolved }] : []),
+  ];
+
   const renderItem = ({ item }: { item: ShoppingItem }) => {
     const isResolved = item.status === 'resolved';
     return (
@@ -93,7 +101,7 @@ export default function ShoppingScreen() {
         activeOpacity={0.7}
       >
         <View style={[styles.checkbox, isResolved && styles.checkboxChecked]}>
-          {isResolved && <Check size={12} color="#FFF" strokeWidth={3} />}
+          {isResolved && <Check size={14} color="#FFF" strokeWidth={3} />}
         </View>
         <View style={styles.itemInfo}>
           <Text style={[styles.itemName, isResolved && styles.itemNameDone]} numberOfLines={1}>
@@ -101,65 +109,112 @@ export default function ShoppingScreen() {
           </Text>
           {(item as any).profiles?.name && (
             <Text style={styles.itemBy} numberOfLines={1}>
-              Añadido por {(item as any).profiles.name}
+              {(item as any).profiles.name.split(' ')[0]}
             </Text>
           )}
         </View>
+        <TouchableOpacity
+          style={styles.itemDeleteBtn}
+          onPress={() => setPendingDelete(item)}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Trash2 size={14} color="rgba(139,69,19,0.25)" />
+        </TouchableOpacity>
       </TouchableOpacity>
     );
   };
 
-  const pending = items.filter(i => i.status !== 'resolved');
-  const resolved = items.filter(i => i.status === 'resolved');
+  const renderSectionHeader = ({ section }: { section: { key: string; title: string } }) => {
+    if (section.key === 'resolved') {
+      return (
+        <TouchableOpacity
+          style={styles.sectionHeader}
+          onPress={() => setBoughtCollapsed(!boughtCollapsed)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.sectionHeaderText}>{section.title}</Text>
+          <View style={styles.sectionHeaderRight}>
+            {resolved.length > 0 && (
+              <TouchableOpacity
+                onPress={() => setShowClearConfirm(true)}
+                style={styles.clearPill}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.clearPillText}>Limpiar</Text>
+              </TouchableOpacity>
+            )}
+            {boughtCollapsed
+              ? <ChevronDown size={16} color={theme.colors.textSecondary} />
+              : <ChevronUp size={16} color={theme.colors.textSecondary} />}
+          </View>
+        </TouchableOpacity>
+      );
+    }
+    return (
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionHeaderText}>{section.title}</Text>
+      </View>
+    );
+  };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Compras</Text>
-          <Text style={styles.headerSub}>{pending.length} pendientes</Text>
-        </View>
-        {resolved.length > 0 && (
-          <TouchableOpacity onPress={() => setShowClearConfirm(true)} style={styles.clearBtn}>
-            <Text style={styles.clearBtnText}>Limpiar ✓</Text>
-          </TouchableOpacity>
-        )}
+        <ShoppingCart size={22} color={theme.colors.primary} />
+        <Text style={styles.headerTitle}>Lista de Compras</Text>
       </View>
 
-      {/* Input */}
-      <View style={styles.inputRow}>
+      {/* Input fijo arriba */}
+      <View style={styles.inputCard}>
         <TextInput
           style={styles.input}
-          placeholder="Agregar ítem..."
+          placeholder="¿Qué falta comprar?"
           placeholderTextColor="rgba(139,69,19,0.35)"
           value={newItem}
           onChangeText={setNewItem}
           onSubmitEditing={handleAddItem}
           returnKeyType="done"
         />
-        <TouchableOpacity style={styles.addBtn} onPress={handleAddItem}>
+        <TouchableOpacity
+          style={[styles.addBtn, !newItem.trim() && styles.addBtnDisabled]}
+          onPress={handleAddItem}
+          disabled={!newItem.trim()}
+        >
           <Plus size={20} color="#FFF" />
         </TouchableOpacity>
       </View>
 
       {items.length === 0 ? (
         <View style={styles.empty}>
-          <ShoppingCart size={56} color="rgba(139,69,19,0.2)" strokeWidth={1.5} />
-          <Text style={styles.emptyTitle}>Lista vacía</Text>
-          <Text style={styles.emptyText}>Agregá items arriba para empezar</Text>
+          <View style={styles.emptyIconBg}>
+            <ShoppingCart size={40} color={theme.colors.primary} strokeWidth={1.5} />
+          </View>
+          <Text style={styles.emptyTitle}>No falta nada</Text>
+          <Text style={styles.emptyText}>Agregá lo que necesiten comprar{'\n'}y tachalo cuando lo consigan</Text>
         </View>
       ) : (
-        <FlatList
-          data={items}
+        <SectionList
+          sections={sections}
           keyExtractor={i => i.id}
           renderItem={renderItem}
-          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 80 }]}
+          renderSectionHeader={renderSectionHeader}
+          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 90 }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
+          stickySectionHeadersEnabled={false}
         />
       )}
 
-      {/* Modal: eliminar ítem */}
+      {/* Contador flotante */}
+      {pending.length > 0 && (
+        <View style={[styles.floatingCounter, { bottom: insets.bottom + 90 }]}>
+          <Text style={styles.floatingCounterText}>
+            {pending.length} {pending.length === 1 ? 'item pendiente' : 'items pendientes'}
+          </Text>
+        </View>
+      )}
+
+      {/* Modal: eliminar item */}
       <Modal visible={!!pendingDelete} animationType="fade" transparent>
         <View style={styles.overlayCenter}>
           <View style={styles.confirmModal}>
@@ -167,7 +222,7 @@ export default function ShoppingScreen() {
               <X size={18} color={theme.colors.textSecondary} />
             </TouchableOpacity>
             <Text style={styles.confirmEmoji}>🗑️</Text>
-            <Text style={styles.confirmTitle}>Eliminar ítem</Text>
+            <Text style={styles.confirmTitle}>Eliminar item</Text>
             <Text style={styles.confirmBody}>¿Eliminar "{pendingDelete?.name}" de la lista?</Text>
             <View style={styles.confirmBtns}>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setPendingDelete(null)}>
@@ -189,8 +244,8 @@ export default function ShoppingScreen() {
               <X size={18} color={theme.colors.textSecondary} />
             </TouchableOpacity>
             <Text style={styles.confirmEmoji}>✅</Text>
-            <Text style={styles.confirmTitle}>Limpiar completados</Text>
-            <Text style={styles.confirmBody}>¿Eliminar todos los ítems ya comprados?</Text>
+            <Text style={styles.confirmTitle}>Limpiar comprados</Text>
+            <Text style={styles.confirmBody}>¿Eliminar los {resolved.length} items ya comprados?</Text>
             <View style={styles.confirmBtns}>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowClearConfirm(false)}>
                 <Text style={styles.cancelBtnText}>Cancelar</Text>
@@ -208,52 +263,101 @@ export default function ShoppingScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
-  header: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  headerTitle: { fontSize: 26, fontWeight: '700', color: theme.colors.text, letterSpacing: -0.5 },
-  headerSub: { fontSize: 13, color: theme.colors.textSecondary, marginTop: 2, fontWeight: '500' },
-  clearBtn: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(16,185,129,0.12)', borderRadius: 20 },
-  clearBtnText: { fontSize: 12, fontWeight: '700', color: theme.colors.success },
-  inputRow: {
-    flexDirection: 'row', gap: 10, paddingHorizontal: 20,
-    paddingVertical: 14, alignItems: 'center',
+
+  header: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 20, paddingTop: 14, paddingBottom: 6,
+  },
+  headerTitle: {
+    fontSize: 24, fontWeight: '700', color: theme.colors.text, letterSpacing: -0.5,
+  },
+
+  inputCard: {
+    flexDirection: 'row', gap: 10, marginHorizontal: 16,
+    marginTop: 10, marginBottom: 6, padding: 6, paddingLeft: 16,
+    backgroundColor: '#FFF', borderRadius: 16,
+    borderWidth: 1, borderColor: 'rgba(139,69,19,0.1)',
+    alignItems: 'center',
+    shadowColor: '#8B4513', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
   },
   input: {
-    flex: 1, backgroundColor: '#FFF', borderRadius: 12,
-    borderWidth: 1, borderColor: 'rgba(139,69,19,0.12)',
-    paddingHorizontal: 14, paddingVertical: 12,
-    fontSize: 14, color: theme.colors.text,
+    flex: 1, fontSize: 15, color: theme.colors.text,
+    paddingVertical: 10,
   },
   addBtn: {
-    width: 44, height: 44, borderRadius: 22,
+    width: 42, height: 42, borderRadius: 14,
     backgroundColor: theme.colors.primary,
     alignItems: 'center', justifyContent: 'center',
-    shadowColor: theme.colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3, shadowRadius: 6, elevation: 4,
   },
-  list: { paddingHorizontal: 16, paddingTop: 4 },
+  addBtnDisabled: { opacity: 0.4 },
+
+  list: { paddingHorizontal: 16, paddingTop: 8 },
+
+  sectionHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingVertical: 12, paddingHorizontal: 4, marginTop: 8,
+  },
+  sectionHeaderText: {
+    fontSize: 13, fontWeight: '700', color: theme.colors.textSecondary,
+    textTransform: 'uppercase', letterSpacing: 0.5,
+  },
+  sectionHeaderRight: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+  },
+  clearPill: {
+    paddingHorizontal: 10, paddingVertical: 4,
+    backgroundColor: 'rgba(239,68,68,0.08)', borderRadius: 12,
+  },
+  clearPillText: { fontSize: 11, fontWeight: '700', color: '#EF4444' },
+
   item: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: '#FFF', borderRadius: 12, padding: 14,
-    marginHorizontal: 4, marginBottom: 8,
-    borderWidth: 1, borderColor: 'rgba(139,69,19,0.1)',
+    backgroundColor: '#FFF', borderRadius: 14, padding: 14,
+    marginBottom: 6,
+    borderWidth: 1, borderColor: 'rgba(139,69,19,0.08)',
     shadowColor: '#8B4513', shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
+    shadowOpacity: 0.03, shadowRadius: 4, elevation: 1,
   },
-  itemResolved: { opacity: 0.45 },
+  itemResolved: { opacity: 0.5, backgroundColor: 'rgba(255,255,255,0.6)' },
   checkbox: {
-    width: 24, height: 24, borderRadius: 6,
-    borderWidth: 2, borderColor: 'rgba(139,69,19,0.3)',
+    width: 26, height: 26, borderRadius: 8,
+    borderWidth: 2, borderColor: 'rgba(139,69,19,0.25)',
     alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   },
   checkboxChecked: { backgroundColor: theme.colors.success, borderColor: theme.colors.success },
   itemInfo: { flex: 1 },
   itemName: { fontSize: 15, fontWeight: '600', color: theme.colors.text },
   itemNameDone: { textDecorationLine: 'line-through', color: theme.colors.textSecondary },
-  itemBy: { fontSize: 12, color: theme.colors.textSecondary, marginTop: 2 },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingTop: 60 },
-  emptyTitle: { fontSize: 18, fontWeight: '700', color: theme.colors.text },
-  emptyText: { fontSize: 14, color: theme.colors.textSecondary, textAlign: 'center' },
+  itemBy: { fontSize: 11, color: theme.colors.textSecondary, marginTop: 2 },
+  itemDeleteBtn: {
+    padding: 6, borderRadius: 8,
+  },
+
+  empty: {
+    flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12,
+    paddingHorizontal: 40,
+  },
+  emptyIconBg: {
+    width: 80, height: 80, borderRadius: 40,
+    backgroundColor: 'rgba(139,69,19,0.06)',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 4,
+  },
+  emptyTitle: { fontSize: 20, fontWeight: '700', color: theme.colors.text },
+  emptyText: {
+    fontSize: 14, color: theme.colors.textSecondary,
+    textAlign: 'center', lineHeight: 20,
+  },
+
+  floatingCounter: {
+    position: 'absolute', alignSelf: 'center',
+    backgroundColor: theme.colors.primary, borderRadius: 20,
+    paddingHorizontal: 16, paddingVertical: 8,
+    shadowColor: theme.colors.primary, shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, shadowRadius: 8, elevation: 6,
+  },
+  floatingCounterText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
+
   overlayCenter: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 24 },
   confirmModal: {
     backgroundColor: '#FFF', borderRadius: 24, padding: 28, width: '100%', maxWidth: 340,
