@@ -14,29 +14,7 @@ import { format, parseISO, addDays, formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { notifyOtherUser } from '../../src/lib/notifications';
-import Svg, { Circle } from 'react-native-svg';
 
-const CircularProgress = ({ value, max, color, size = 88, strokeWidth = 7 }: {
-  value: number; max: number; color: string; size?: number; strokeWidth?: number;
-}) => {
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const progress = max > 0 ? Math.min(Math.max(value / max, 0), 1) : 0;
-  const center = size / 2;
-  return (
-    <Svg width={size} height={size}>
-      <Circle cx={center} cy={center} r={radius} stroke="rgba(139,69,19,0.1)" strokeWidth={strokeWidth} fill="none" />
-      <Circle
-        cx={center} cy={center} r={radius}
-        stroke={color} strokeWidth={strokeWidth} fill="none"
-        strokeDasharray={circumference}
-        strokeDashoffset={circumference * (1 - progress)}
-        strokeLinecap="round"
-        transform={`rotate(-90 ${center} ${center})`}
-      />
-    </Svg>
-  );
-};
 
 const parseNoteContent = (raw: string): { current: string; history: string[] } => {
   try {
@@ -274,26 +252,22 @@ export default function DashboardScreen() {
       {/* Resumen Puntos */}
       <View style={styles.pointsSummary}>
         <Text style={styles.pointsTitle}>Saldo de Puntos</Text>
-        <View style={styles.pointsCirclesRow}>
-          {([
-            { name: 'Liz', pts: points.Liz, color: '#F472B6' },
-            { name: 'Martín', pts: points.Martin, color: '#60A5FA' },
-          ] as const).map(({ name, pts, color }) => {
-            const maxPts = Math.max(points.Liz, points.Martin, 1);
-            return (
-              <View key={name} style={styles.pointsCircleWrapper}>
-                <View style={styles.pointsCircleContainer}>
-                  <CircularProgress value={pts} max={maxPts} color={color} size={92} strokeWidth={7} />
-                  <View style={styles.pointsCircleInner}>
-                    <Text style={[styles.pointsCircleNum, { color }]}>{pts}</Text>
-                    <Text style={styles.pointsCirclePts}>pts</Text>
-                  </View>
-                </View>
-                <Text style={styles.pointsCircleName}>{name}</Text>
+        {([
+          { name: 'Liz', pts: points.Liz, color: '#F472B6' },
+          { name: 'Martín', pts: points.Martin, color: '#60A5FA' },
+        ] as const).map(({ name, pts, color }) => {
+          const maxPts = Math.max(points.Liz, points.Martin, 1);
+          const pct = Math.min(Math.max(pts / maxPts, 0), 1);
+          return (
+            <View key={name} style={styles.pointsRow}>
+              <Text style={styles.pointsRowName}>{name}</Text>
+              <View style={styles.pointsBarTrack}>
+                <View style={[styles.pointsBarFill, { width: `${pct * 100}%` as any, backgroundColor: color }]} />
               </View>
-            );
-          })}
-        </View>
+              <Text style={[styles.pointsRowNum, { color }]}>{pts}</Text>
+            </View>
+          );
+        })}
       </View>
 
       {/* Secciones dinámicas - ordenadas por actividad más reciente */}
@@ -636,16 +610,13 @@ const styles = StyleSheet.create({
     marginBottom: 24, paddingVertical: 20, paddingHorizontal: 16, backgroundColor: '#FFF', borderRadius: 18,
     borderWidth: 1, borderColor: 'rgba(139, 69, 19, 0.08)',
     shadowColor: '#8B4513', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.07, shadowRadius: 10, elevation: 2,
-    alignItems: 'center',
   },
-  pointsTitle: { fontSize: 15, fontWeight: '700', color: theme.colors.text, marginBottom: 16, alignSelf: 'flex-start' },
-  pointsCirclesRow: { flexDirection: 'row', justifyContent: 'space-around', width: '100%' },
-  pointsCircleWrapper: { alignItems: 'center', gap: 8 },
-  pointsCircleContainer: { width: 92, height: 92, alignItems: 'center', justifyContent: 'center' },
-  pointsCircleInner: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
-  pointsCircleNum: { fontSize: 24, fontWeight: '800', letterSpacing: -1, lineHeight: 26 },
-  pointsCirclePts: { fontSize: 11, color: theme.colors.textSecondary, fontWeight: '600', marginTop: -2 },
-  pointsCircleName: { fontSize: 13, fontWeight: '600', color: theme.colors.text },
+  pointsTitle: { fontSize: 15, fontWeight: '700', color: theme.colors.text, marginBottom: 12, alignSelf: 'flex-start' },
+  pointsRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  pointsRowName: { fontSize: 13, fontWeight: '600', color: theme.colors.text, width: 50 },
+  pointsBarTrack: { flex: 1, height: 8, backgroundColor: 'rgba(139,69,19,0.1)', borderRadius: 4, overflow: 'hidden' },
+  pointsBarFill: { height: 8, borderRadius: 4 },
+  pointsRowNum: { fontSize: 14, fontWeight: '800', width: 36, textAlign: 'right' },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
   modal: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '80%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
