@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  TextInput, Alert, RefreshControl,
+  TextInput, Alert, RefreshControl, Modal,
 } from 'react-native';
 import { useProfileStore } from '../../src/store/useProfileStore';
 import { theme } from '../../src/constants/theme';
 import { supabase } from '../../src/lib/supabase';
 import { ShoppingItem } from '../../src/types/database.types';
-import { Plus, Check, ShoppingCart } from 'lucide-react-native';
+import { Plus, Check, ShoppingCart, X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { notifyOtherUser } from '../../src/lib/notifications';
 
@@ -17,6 +17,8 @@ export default function ShoppingScreen() {
   const [items, setItems] = useState<ShoppingItem[]>([]);
   const [newItem, setNewItem] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<ShoppingItem | null>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const fetchItems = async () => {
     const { data } = await supabase
@@ -28,15 +30,14 @@ export default function ShoppingScreen() {
   };
 
   const onRefresh = async () => { setRefreshing(true); await fetchItems(); setRefreshing(false); };
-  useEffect(() => { 
-    fetchItems(); 
 
+  useEffect(() => {
+    fetchItems();
     const channel = supabase.channel('shopping_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items' }, () => {
         fetchItems();
       })
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, []);
 
@@ -48,47 +49,22 @@ export default function ShoppingScreen() {
       created_by_profile_id: activeProfile.id,
     });
     if (error) { Alert.alert('Error', 'No se pudo agregar el item'); return; }
-    notifyOtherUser(activeProfile.name, '🛒 Lista de compras', `${activeProfile.name.split(' ')[0]} agregó "${newItem.trim()}" a la lista.`);
+    notifyOtherUser(activeProfile.id, '🛒 Lista de compras', `${activeProfile.name.split(' ')[0]} agregó "${newItem.trim()}" a la lista.`);
     setNewItem('');
     fetchItems();
   };
 
-  const profileColor = theme.colors.primary;
-
-  const handleDeleteItem = (item: ShoppingItem) => {
-    Alert.alert(
-      'Eliminar ítem',
-      `¿Eliminar "${item.name}" de la lista?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            const { error } = await supabase.from('shopping_items').delete().eq('id', item.id);
-            if (!error) fetchItems();
-          }
-        }
-      ]
-    );
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    const { error } = await supabase.from('shopping_items').delete().eq('id', pendingDelete.id);
+    setPendingDelete(null);
+    if (!error) fetchItems();
   };
 
-  const clearResolved = async () => {
-    Alert.alert(
-      'Limpiar completados',
-      '¿Eliminar todos los ítems ya comprados?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Limpiar',
-          style: 'destructive',
-          onPress: async () => {
-            await supabase.from('shopping_items').delete().eq('status', 'resolved');
-            fetchItems();
-          }
-        }
-      ]
-    );
+  const confirmClear = async () => {
+    setShowClearConfirm(false);
+    await supabase.from('shopping_items').delete().eq('status', 'resolved');
+    fetchItems();
   };
 
   const toggleStatus = async (item: ShoppingItem) => {
@@ -101,7 +77,7 @@ export default function ShoppingScreen() {
     const { error } = await supabase.from('shopping_items').update(updates).eq('id', item.id);
     if (!error) {
       if (!isResolved) {
-        notifyOtherUser(activeProfile.name, '✅ Compra completada', `${activeProfile.name.split(' ')[0]} compró "${item.name}".`);
+        notifyOtherUser(activeProfile.id, '✅ Compra completada', `${activeProfile.name.split(' ')[0]} compró "${item.name}".`);
       }
       fetchItems();
     }
@@ -113,7 +89,7 @@ export default function ShoppingScreen() {
       <TouchableOpacity
         style={[styles.item, isResolved && styles.itemResolved]}
         onPress={() => toggleStatus(item)}
-        onLongPress={() => handleDeleteItem(item)}
+        onLongPress={() => setPendingDelete(item)}
         activeOpacity={0.7}
       >
         <View style={[styles.checkbox, isResolved && styles.checkboxChecked]}>
@@ -145,7 +121,7 @@ export default function ShoppingScreen() {
           <Text style={styles.headerSub}>{pending.length} pendientes</Text>
         </View>
         {resolved.length > 0 && (
-          <TouchableOpacity onPress={clearResolved} style={styles.clearBtn}>
+          <TouchableOpacity onPress={() => setShowClearConfirm(true)} style={styles.clearBtn}>
             <Text style={styles.clearBtnText}>Limpiar ✓</Text>
           </TouchableOpacity>
         )}
@@ -162,7 +138,7 @@ export default function ShoppingScreen() {
           onSubmitEditing={handleAddItem}
           returnKeyType="done"
         />
-        <TouchableOpacity style={[styles.addBtn, { backgroundColor: profileColor }]} onPress={handleAddItem}>
+        <TouchableOpacity style={styles.addBtn} onPress={handleAddItem}>
           <Plus size={20} color="#FFF" />
         </TouchableOpacity>
       </View>
@@ -182,6 +158,50 @@ export default function ShoppingScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
         />
       )}
+
+      {/* Modal: eliminar ítem */}
+      <Modal visible={!!pendingDelete} animationType="fade" transparent>
+        <View style={styles.overlayCenter}>
+          <View style={styles.confirmModal}>
+            <TouchableOpacity style={styles.confirmClose} onPress={() => setPendingDelete(null)}>
+              <X size={18} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+            <Text style={styles.confirmEmoji}>🗑️</Text>
+            <Text style={styles.confirmTitle}>Eliminar ítem</Text>
+            <Text style={styles.confirmBody}>¿Eliminar "{pendingDelete?.name}" de la lista?</Text>
+            <View style={styles.confirmBtns}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setPendingDelete(null)}>
+                <Text style={styles.cancelBtnText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.deleteBtn} onPress={confirmDelete}>
+                <Text style={styles.deleteBtnText}>Eliminar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal: limpiar completados */}
+      <Modal visible={showClearConfirm} animationType="fade" transparent>
+        <View style={styles.overlayCenter}>
+          <View style={styles.confirmModal}>
+            <TouchableOpacity style={styles.confirmClose} onPress={() => setShowClearConfirm(false)}>
+              <X size={18} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+            <Text style={styles.confirmEmoji}>✅</Text>
+            <Text style={styles.confirmTitle}>Limpiar completados</Text>
+            <Text style={styles.confirmBody}>¿Eliminar todos los ítems ya comprados?</Text>
+            <View style={styles.confirmBtns}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowClearConfirm(false)}>
+                <Text style={styles.cancelBtnText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.deleteBtn} onPress={confirmClear}>
+                <Text style={styles.deleteBtnText}>Limpiar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -234,4 +254,19 @@ const styles = StyleSheet.create({
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingTop: 60 },
   emptyTitle: { fontSize: 18, fontWeight: '700', color: theme.colors.text },
   emptyText: { fontSize: 14, color: theme.colors.textSecondary, textAlign: 'center' },
+  overlayCenter: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  confirmModal: {
+    backgroundColor: '#FFF', borderRadius: 24, padding: 28, width: '100%', maxWidth: 340,
+    alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15, shadowRadius: 24, elevation: 10,
+  },
+  confirmClose: { position: 'absolute', top: 16, right: 16, padding: 4 },
+  confirmEmoji: { fontSize: 36, marginBottom: 8 },
+  confirmTitle: { fontSize: 18, fontWeight: '700', color: theme.colors.text, marginBottom: 6 },
+  confirmBody: { fontSize: 14, color: theme.colors.textSecondary, textAlign: 'center', marginBottom: 24 },
+  confirmBtns: { flexDirection: 'row', gap: 12, width: '100%' },
+  cancelBtn: { flex: 1, borderRadius: 14, paddingVertical: 14, alignItems: 'center', backgroundColor: 'rgba(139,69,19,0.08)' },
+  cancelBtnText: { fontSize: 15, fontWeight: '600', color: theme.colors.textSecondary },
+  deleteBtn: { flex: 1, borderRadius: 14, paddingVertical: 14, alignItems: 'center', backgroundColor: '#EF4444' },
+  deleteBtnText: { fontSize: 15, fontWeight: '700', color: '#FFF' },
 });

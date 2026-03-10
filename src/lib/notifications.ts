@@ -163,16 +163,14 @@ export async function sendPushNotification(pushToken: string, title: string, bod
 /**
  * Función útil para notificar automáticamente a la pareja sin tener que buscar su token a mano.
  */
-export async function notifyOtherUser(activeProfileName: string, title: string, body: string, data = {}) {
-  const otherName = activeProfileName === 'Liz' ? 'Martin' : 'Liz';
-  
+export async function notifyOtherUser(activeProfileId: string, title: string, body: string, data = {}) {
   try {
     const { data: profile } = await supabase
       .from('profiles')
       .select('push_token')
-      .eq('name', otherName)
+      .neq('id', activeProfileId)
       .single();
-      
+
     if (profile?.push_token) {
       await sendPushNotification(profile.push_token, title, body, data);
     }

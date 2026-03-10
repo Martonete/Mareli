@@ -70,7 +70,7 @@ export default function CalendarScreen() {
       Alert.alert('Error', error.message);
       return;
     }
-    notifyOtherUser(activeProfile.name, '📅 Nuevo evento', `${activeProfile.name.split(' ')[0]} agendó "${title.trim()}" para el ${format(selectedDate, 'dd/MM')}.`);
+    notifyOtherUser(activeProfile.id, '📅 Nuevo evento', `${activeProfile.name.split(' ')[0]} agendó "${title.trim()}" para el ${format(selectedDate, 'dd/MM')}.`);
     setIsModalVisible(false);
     setTitle(''); setEventTime(''); setDescription('');
     fetchEvents();

@@ -138,7 +138,7 @@ export default function TasksScreen() {
         target_date: taskToComplete.target_date,
         notes: taskToComplete.notes ? `(Compartida) ${taskToComplete.notes}` : '(Compartida)',
       });
-      notifyOtherUser(activeProfile.name, '🤝 Tarea compartida', `${activeProfile.name.split(' ')[0]} marcó "${taskToComplete.task_types?.name}" como realizada por ambos.`);
+      notifyOtherUser(activeProfile.id, '🤝 Tarea compartida', `${activeProfile.name.split(' ')[0]} marcó "${taskToComplete.task_types?.name}" como realizada por ambos.`);
       
     } else {
       const { error } = await supabase
@@ -155,7 +155,7 @@ export default function TasksScreen() {
         Alert.alert('Error', 'No se pudo completar la tarea');
       } else {
         const completerName = profiles.find(p => p.id === assignee)?.name || activeProfile.name;
-        notifyOtherUser(activeProfile.name, '✅ Tarea completada', `${completerName.split(' ')[0]} completó "${taskToComplete.task_types?.name}" y ganó puntos!`);
+        notifyOtherUser(activeProfile.id, '✅ Tarea completada', `${completerName.split(' ')[0]} completó "${taskToComplete.task_types?.name}" y ganó puntos!`);
       }
     }
     
@@ -217,7 +217,7 @@ export default function TasksScreen() {
       return;
     }
     
-    notifyOtherUser(activeProfile.name, '📋 Nueva tarea', `${activeProfile.name.split(' ')[0]} agregó "${isCreatingNewType ? newTypeName.trim() : taskTypes.find(t=>t.id===selectedTypeId)?.name}" a la lista.`);
+    notifyOtherUser(activeProfile.id, '📋 Nueva tarea', `${activeProfile.name.split(' ')[0]} agregó "${isCreatingNewType ? newTypeName.trim() : taskTypes.find(t=>t.id===selectedTypeId)?.name}" a la lista.`);
     
     setIsModalVisible(false);
     setNotes('');

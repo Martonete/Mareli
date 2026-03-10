@@ -20,10 +20,11 @@ export default function RootLayout() {
   useEffect(() => {
     if (!activeProfile) return;
     (async () => {
+      // Sync local profile name to DB (ensures 'Liz' matches DB, not 'Elizabeth')
+      const updates: Record<string, any> = { name: activeProfile.name };
       const token = await registerForPushNotificationsAsync();
-      if (token) {
-        await supabase.from('profiles').update({ push_token: token }).eq('id', activeProfile.id);
-      }
+      if (token) updates.push_token = token;
+      await supabase.from('profiles').update(updates).eq('id', activeProfile.id);
     })();
   }, [activeProfile?.id]);
 

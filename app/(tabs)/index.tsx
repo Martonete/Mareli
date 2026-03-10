@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, RefreshControl,
   TouchableOpacity, Platform, StatusBar, Modal, TextInput, Alert
@@ -56,7 +56,7 @@ export default function DashboardScreen() {
   const [pendingShopping, setPendingShopping] = useState<any[]>([]);
   const [recentNotes, setRecentNotes] = useState<any[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
-  const [points, setPoints] = useState({ Liz: 0, Martin: 0 });
+  const [points, setPoints] = useState<{ [name: string]: number }>({});
   const [recentRedemptions, setRecentRedemptions] = useState<any[]>([]);
   const [isNoteModalVisible, setIsNoteModalVisible] = useState(false);
   const [newNoteContent, setNewNoteContent] = useState('');
@@ -68,7 +68,7 @@ export default function DashboardScreen() {
       { data: tasks, error: e1 },
       { data: items, error: e2 },
       { data: notes, error: e3 },
-      { data: ptsData, error: e4 },
+      { data: ptsData },
       { data: eventsData, error: e5 },
       { data: redemptionsData },
     ] = await Promise.all([
@@ -113,18 +113,18 @@ export default function DashboardScreen() {
     if (notes) setRecentNotes(notes);
     if (eventsData) setUpcomingEvents(eventsData);
     if (ptsData) {
-      let eliPts = 0, marPts = 0;
+      const earned: { [name: string]: number } = {};
       ptsData.forEach((t: any) => {
-        if (t.profiles?.name === 'Liz') eliPts += (t.points_awarded || 0);
-        if (t.profiles?.name === 'Martin') marPts += (t.points_awarded || 0);
+        const n = t.profiles?.name;
+        if (n) earned[n] = (earned[n] || 0) + (t.points_awarded || 0);
       });
       if (redemptionsData) {
         redemptionsData.forEach((r: any) => {
-          if (r.profiles?.name === 'Liz') eliPts -= (r.points_cost || 0);
-          if (r.profiles?.name === 'Martin') marPts -= (r.points_cost || 0);
+          const n = r.profiles?.name;
+          if (n) earned[n] = (earned[n] || 0) - (r.points_cost || 0);
         });
       }
-      setPoints({ Liz: eliPts, Martin: marPts });
+      setPoints(earned);
       setRecentRedemptions(redemptionsData?.slice(0, 3) || []);
     }
   };
@@ -139,7 +139,7 @@ export default function DashboardScreen() {
       setIsNoteModalVisible(false);
       setNewNoteContent('');
       fetchData();
-      notifyOtherUser(activeProfile.name, '📝 Nueva nota', `${activeProfile.name.split(' ')[0]} dejó una nueva nota rápida en el corcho.`);
+      notifyOtherUser(activeProfile.id, '📝 Nueva nota', `${activeProfile.name.split(' ')[0]} dejó una nueva nota rápida en el corcho.`);
     } else {
       Alert.alert('Error', 'No se pudo guardar la nota');
     }
@@ -165,7 +165,7 @@ export default function DashboardScreen() {
       setEditContent('');
       fetchData();
       if (activeProfile && changed) {
-        notifyOtherUser(activeProfile.name, '✏️ Nota editada', `${activeProfile.name.split(' ')[0]} actualizó una nota.`);
+        notifyOtherUser(activeProfile.id, '✏️ Nota editada', `${activeProfile.name.split(' ')[0]} actualizó una nota.`);
       }
     } else {
       Alert.alert('Error', 'No se pudo guardar la edición');
@@ -252,15 +252,14 @@ export default function DashboardScreen() {
       {/* Resumen Puntos */}
       <View style={styles.pointsSummary}>
         <Text style={styles.pointsTitle}>Saldo de Puntos</Text>
-        {([
-          { name: 'Liz', pts: points.Liz, color: '#F472B6' },
-          { name: 'Martín', pts: points.Martin, color: '#60A5FA' },
-        ] as const).map(({ name, pts, color }) => {
-          const maxPts = Math.max(points.Liz, points.Martin, 1);
+        {Object.entries(points).map(([name, pts], i) => {
+          const profileColors = ['#F472B6', '#60A5FA'];
+          const color = profileColors[i % profileColors.length];
+          const maxPts = Math.max(...Object.values(points), 1);
           const pct = Math.min(Math.max(pts / maxPts, 0), 1);
           return (
             <View key={name} style={styles.pointsRow}>
-              <Text style={styles.pointsRowName}>{name}</Text>
+              <Text style={styles.pointsRowName}>{name.split(' ')[0]}</Text>
               <View style={styles.pointsBarTrack}>
                 <View style={[styles.pointsBarFill, { width: `${pct * 100}%` as any, backgroundColor: color }]} />
               </View>

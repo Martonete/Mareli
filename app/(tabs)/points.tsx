@@ -15,7 +15,8 @@ export default function PointsScreen() {
   const insets = useSafeAreaInsets();
   const { activeProfile } = useProfileStore();
   const [refreshing, setRefreshing] = useState(false);
-  const [balances, setBalances] = useState({ Liz: 0, Martin: 0 });
+  const [balances, setBalances] = useState<{ [name: string]: number }>({});
+  const [allProfiles, setAllProfiles] = useState<{id: string, name: string}[]>([]);
   const [rewards, setRewards] = useState<any[]>([]);
   const [redemptions, setRedemptions] = useState<any[]>([]);
   const [pendingRedeem, setPendingRedeem] = useState<any>(null);
@@ -36,24 +37,29 @@ export default function PointsScreen() {
       .select('*')
       .order('points_cost', { ascending: true });
 
-    let eliEarned = 0, marEarned = 0;
+    const earned: { [name: string]: number } = {};
+    const spent: { [name: string]: number } = {};
     if (tasks) {
       tasks.forEach((t: any) => {
-        if (t.profiles?.name === 'Liz') eliEarned += (t.points_awarded || 0);
-        if (t.profiles?.name === 'Martin') marEarned += (t.points_awarded || 0);
+        const n = t.profiles?.name;
+        if (n) earned[n] = (earned[n] || 0) + (t.points_awarded || 0);
       });
     }
-
-    let eliSpent = 0, marSpent = 0;
     if (spends) {
       spends.forEach((s: any) => {
-        if (s.profiles?.name === 'Liz') eliSpent += (s.points_cost || 0);
-        if (s.profiles?.name === 'Martin') marSpent += (s.points_cost || 0);
+        const n = s.profiles?.name;
+        if (n) spent[n] = (spent[n] || 0) + (s.points_cost || 0);
       });
       setRedemptions(spends.slice(0, 5));
     }
+    const newBalances: { [name: string]: number } = {};
+    [...new Set([...Object.keys(earned), ...Object.keys(spent)])].forEach(name => {
+      newBalances[name] = (earned[name] || 0) - (spent[name] || 0);
+    });
+    setBalances(newBalances);
 
-    setBalances({ Liz: eliEarned - eliSpent, Martin: marEarned - marSpent });
+    const { data: profilesData } = await supabase.from('profiles').select('id, name');
+    if (profilesData) setAllProfiles(profilesData);
 
     if (items && items.length > 0) {
       setRewards(items);
@@ -118,7 +124,7 @@ export default function PointsScreen() {
 
   const handleRedeem = async (reward: any) => {
     if (!activeProfile) return;
-    const myBal = activeProfile.name === 'Liz' ? balances.Liz : balances.Martin;
+    const myBal = balances[activeProfile.name] ?? 0;
 
     if (myBal < reward.points_cost) {
       Alert.alert('Puntos insuficientes', 'Necesitás seguir completando tareas para alcanzar este premio.');
@@ -158,13 +164,14 @@ export default function PointsScreen() {
     if (error) {
       Alert.alert('Error', 'No se pudo procesar el canje: ' + error.message);
     } else {
-      Alert.alert('¡Canje exitoso! 🎊', `Coordiná con ${activeProfile.name === 'Liz' ? 'Martín' : 'Liz'} para hacer realidad tu premio 😉`);
-      notifyOtherUser(activeProfile.name, '🎁 Premio canjeado', `${activeProfile.name.split(' ')[0]} canjeó "${pendingRedeem.name}" por ${pendingRedeem.points_cost} pts.`);
+      const partnerName = allProfiles.find(p => p.id !== activeProfile.id)?.name?.split(' ')[0] ?? 'tu pareja';
+      Alert.alert('¡Canje exitoso! 🎊', `Coordiná con ${partnerName} para hacer realidad tu premio 😉`);
+      notifyOtherUser(activeProfile.id, '🎁 Premio canjeado', `${activeProfile.name.split(' ')[0]} canjeó "${pendingRedeem.name}" por ${pendingRedeem.points_cost} pts.`);
       fetchData();
     }
   };
 
-  const myBalance = activeProfile?.name === 'Liz' ? balances.Liz : balances.Martin;
+  const myBalance = balances[activeProfile?.name ?? ''] ?? 0;
 
   return (
     <>
@@ -183,7 +190,7 @@ export default function PointsScreen() {
                 cx={92} cy={92} r={88}
                 stroke="rgba(255,255,255,0.9)" strokeWidth={8} fill="none"
                 strokeDasharray={2 * Math.PI * 88}
-                strokeDashoffset={2 * Math.PI * 88 * (1 - Math.min(myBalance / Math.max(myBalance + (activeProfile?.name === 'Liz' ? balances.Martin : balances.Liz), 1), 1))}
+                strokeDashoffset={2 * Math.PI * 88 * (1 - Math.min(myBalance / Math.max(myBalance + (Object.entries(balances).find(([n]) => n !== activeProfile?.name)?.[1] ?? 0), 1), 1))}
                 strokeLinecap="round"
                 transform="rotate(-90 92 92)"
               />
@@ -200,15 +207,15 @@ export default function PointsScreen() {
         <View style={styles.partnerCard}>
           <Text style={styles.partnerTitle}>Saldo familiar</Text>
           <View style={styles.partnerRow}>
-            <View style={styles.partnerCol}>
-              <Text style={styles.partnerName}>Liz</Text>
-              <Text style={[styles.partnerPts, { color: '#F472B6' }]}>{balances.Liz} pts</Text>
-            </View>
-            <View style={styles.dividerVertical} />
-            <View style={styles.partnerCol}>
-              <Text style={styles.partnerName}>Martin</Text>
-              <Text style={[styles.partnerPts, { color: '#60A5FA' }]}>{balances.Martin} pts</Text>
-            </View>
+            {allProfiles.map((p, i) => (
+              <React.Fragment key={p.id}>
+                {i > 0 && <View style={styles.dividerVertical} />}
+                <View style={styles.partnerCol}>
+                  <Text style={styles.partnerName}>{p.name.split(' ')[0]}</Text>
+                  <Text style={[styles.partnerPts, { color: i === 0 ? '#F472B6' : '#60A5FA' }]}>{balances[p.name] ?? 0} pts</Text>
+                </View>
+              </React.Fragment>
+            ))}
           </View>
         </View>
 
@@ -255,8 +262,7 @@ export default function PointsScreen() {
             </View>
             <View style={styles.historyCard}>
               {redemptions.map((red, i) => {
-                const isLiz = red.profiles?.name === 'Liz';
-                const nameColor = isLiz ? theme.colors.primary : '#5D4037';
+                const nameColor = red.profiles?.name === allProfiles[0]?.name ? theme.colors.primary : '#5D4037';
                 const timeAgo = red.created_at
                   ? formatDistanceToNow(parseISO(red.created_at), { addSuffix: true, locale: es })
                   : '';
