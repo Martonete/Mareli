@@ -311,9 +311,11 @@ export default function TasksScreen() {
               <Text style={[styles.filterText, filter === f.key && styles.filterTextActive]}>
                 {f.label}
               </Text>
-              <Text style={[styles.filterCount, filter === f.key && styles.filterCountActive]}>
-                {count}
-              </Text>
+              <View style={[styles.filterBadge, filter === f.key && styles.filterBadgeActive]}>
+                <Text style={[styles.filterCount, filter === f.key && styles.filterCountActive]}>
+                  {count}
+                </Text>
+              </View>
             </TouchableOpacity>
           );
         })}
@@ -511,26 +513,21 @@ const styles = StyleSheet.create({
   },
   filters: { paddingHorizontal: 20, paddingBottom: 12, gap: 8 },
   filterChip: {
-    paddingHorizontal: 20, paddingVertical: 10,
+    paddingHorizontal: 16, paddingVertical: 10,
     borderRadius: 20, borderWidth: 1, borderColor: 'rgba(139,69,19,0.12)',
     backgroundColor: '#FFF',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: 'row', alignItems: 'center', gap: 8,
   },
   filterChipActive: { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
   filterText: { fontSize: 13, fontWeight: '600', color: theme.colors.textSecondary },
-  filterTextActive: {
-    color: '#FFF',
+  filterTextActive: { color: '#FFF' },
+  filterBadge: {
+    backgroundColor: 'rgba(139,69,19,0.1)', borderRadius: 10,
+    paddingHorizontal: 8, paddingVertical: 2, minWidth: 28, alignItems: 'center',
   },
-  filterCount: {
-    fontSize: 18,
-    color: theme.colors.textSecondary,
-    fontWeight: '800',
-    marginTop: 4,
-  },
-  filterCountActive: {
-    color: 'rgba(255, 255, 255, 0.9)',
-  },
+  filterBadgeActive: { backgroundColor: 'rgba(255,255,255,0.25)' },
+  filterCount: { fontSize: 13, color: theme.colors.textSecondary, fontWeight: '800' },
+  filterCountActive: { color: '#FFF' },
   stats: { paddingHorizontal: 20, paddingBottom: 8 },
   statsText: { fontSize: 12, color: theme.colors.textSecondary, fontWeight: '500' },
   list: { paddingHorizontal: 16, gap: 8, paddingTop: 4 },
