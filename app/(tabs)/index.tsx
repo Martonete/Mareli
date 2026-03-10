@@ -186,6 +186,9 @@ export default function DashboardScreen() {
       setEditingNote(null);
       setEditContent('');
       fetchData();
+      if (activeProfile && changed) {
+        notifyOtherUser(activeProfile.name, '✏️ Nota editada', `${activeProfile.name.split(' ')[0]} actualizó una nota.`);
+      }
     } else {
       Alert.alert('Error', 'No se pudo guardar la edición');
     }

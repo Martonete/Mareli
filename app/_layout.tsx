@@ -4,6 +4,8 @@ import { useProfileStore } from '../src/store/useProfileStore';
 import { View, ActivityIndicator } from 'react-native';
 import { theme } from '../src/constants/theme';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { registerForPushNotificationsAsync } from '../src/lib/notifications';
+import { supabase } from '../src/lib/supabase';
 
 export default function RootLayout() {
   const { activeProfile, isLoading, loadProfile } = useProfileStore();
@@ -14,6 +16,16 @@ export default function RootLayout() {
   useEffect(() => {
     loadProfile().then(() => setIsReady(true));
   }, []);
+
+  useEffect(() => {
+    if (!activeProfile) return;
+    (async () => {
+      const token = await registerForPushNotificationsAsync();
+      if (token) {
+        await supabase.from('profiles').update({ push_token: token }).eq('id', activeProfile.id);
+      }
+    })();
+  }, [activeProfile?.id]);
 
   useEffect(() => {
     if (!isReady) return;

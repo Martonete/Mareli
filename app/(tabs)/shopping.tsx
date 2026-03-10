@@ -92,13 +92,19 @@ export default function ShoppingScreen() {
   };
 
   const toggleStatus = async (item: ShoppingItem) => {
+    if (!activeProfile) return;
     const isResolved = item.status === 'resolved';
     const newStatus = isResolved ? 'pending' : 'resolved';
     const updates = isResolved
       ? { status: newStatus, resolved_by_profile_id: null, resolved_at: null }
-      : { status: newStatus, resolved_by_profile_id: activeProfile?.id, resolved_at: new Date().toISOString() };
+      : { status: newStatus, resolved_by_profile_id: activeProfile.id, resolved_at: new Date().toISOString() };
     const { error } = await supabase.from('shopping_items').update(updates).eq('id', item.id);
-    if (!error) fetchItems();
+    if (!error) {
+      if (!isResolved) {
+        notifyOtherUser(activeProfile.name, '✅ Compra completada', `${activeProfile.name.split(' ')[0]} compró "${item.name}".`);
+      }
+      fetchItems();
+    }
   };
 
   const renderItem = ({ item }: { item: ShoppingItem }) => {

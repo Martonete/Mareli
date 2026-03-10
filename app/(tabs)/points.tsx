@@ -5,6 +5,7 @@ import { theme } from '../../src/constants/theme';
 import { supabase } from '../../src/lib/supabase';
 import Svg, { Circle } from 'react-native-svg';
 import { Gift, Star, Sparkles, X } from 'lucide-react-native';
+import { notifyOtherUser } from '../../src/lib/notifications';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -158,6 +159,7 @@ export default function PointsScreen() {
       Alert.alert('Error', 'No se pudo procesar el canje: ' + error.message);
     } else {
       Alert.alert('¡Canje exitoso! 🎊', `Coordiná con ${activeProfile.name === 'Liz' ? 'Martín' : 'Liz'} para hacer realidad tu premio 😉`);
+      notifyOtherUser(activeProfile.name, '🎁 Premio canjeado', `${activeProfile.name.split(' ')[0]} canjeó "${pendingRedeem.name}" por ${pendingRedeem.points_cost} pts.`);
       fetchData();
     }
   };
