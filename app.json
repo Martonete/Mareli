@@ -26,7 +26,14 @@
       "package": "com.mguarnieri.CasaEnOrden"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "output": "static",
+      "name": "Casa en Orden",
+      "shortName": "CasaEnOrden",
+      "display": "standalone",
+      "themeColor": "#8B4513",
+      "backgroundColor": "#FAF9F6"
     },
     "plugins": [
       "expo-router",

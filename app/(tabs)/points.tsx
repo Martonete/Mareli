@@ -1,9 +1,11 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, Alert } from 'react-native';
 import { theme } from '../../src/constants/theme';
 import { supabase } from '../../src/lib/supabase';
-import { Gift, Star, Sparkles, CheckCircle2 } from 'lucide-react-native';
+import { Gift, Star, Sparkles } from 'lucide-react-native';
+import { formatDistanceToNow, parseISO } from 'date-fns';
+import { es } from 'date-fns/locale';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useProfileStore } from '../../src/store/useProfileStore';
 
@@ -81,6 +83,13 @@ export default function PointsScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchData();
+
+      const channel = supabase.channel('points_changes')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchData())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'reward_redemptions' }, () => fetchData())
+        .subscribe();
+
+      return () => { supabase.removeChannel(channel); };
     }, [fetchData])
   );
 
@@ -117,7 +126,7 @@ export default function PointsScreen() {
     }
   };
 
-  const handleRedeem = (reward: any) => {
+  const handleRedeem = async (reward: any) => {
     if (!activeProfile) return;
     const myBalance = activeProfile.name === 'Liz' ? balances.Liz : balances.Martin;
 
@@ -126,24 +135,44 @@ export default function PointsScreen() {
       return;
     }
 
+    // Si el reward viene del fallback mock, resolver su ID real en Supabase primero
+    let rewardId = reward.id;
+    if (typeof rewardId === 'string' && rewardId.startsWith('mock-')) {
+      const { data: existing } = await supabase.from('rewards').select('id').eq('name', reward.name).single();
+      if (existing) {
+        rewardId = existing.id;
+      } else {
+        const { data: inserted, error: insertErr } = await supabase
+          .from('rewards')
+          .insert({ name: reward.name, points_cost: reward.points_cost })
+          .select()
+          .single();
+        if (insertErr || !inserted) {
+          Alert.alert('Error', 'No se pudo procesar el canje. Intentá sincronizar los premios primero.');
+          return;
+        }
+        rewardId = inserted.id;
+      }
+    }
+
     Alert.alert(
       'Confirmar canje',
-      `¿Querés gastar ${reward.points_cost} puntos en "${reward.name}"? Te quedarán ${myBalance - reward.points_cost} puntos.`,
+      `¿Querés gastar ${reward.points_cost} puntos en "${reward.name}"?\n\nTe quedarán ${myBalance - reward.points_cost} puntos.`,
       [
         { text: 'Cancelar', style: 'cancel' },
-        { 
-          text: 'Canjear', 
+        {
+          text: '¡Canjear! 🎉',
           style: 'default',
           onPress: async () => {
             const { error } = await supabase.from('reward_redemptions').insert({
               profile_id: activeProfile.id,
-              reward_id: reward.id,
-              points_cost: reward.points_cost
+              reward_id: rewardId,
+              points_cost: reward.points_cost,
             });
             if (error) {
-              Alert.alert('Error', 'No se pudo procesar el canje');
+              Alert.alert('Error', 'No se pudo procesar el canje: ' + error.message);
             } else {
-              Alert.alert('¡Excelente!', 'Canje realizado con éxito. Tienen que coordinar para hacer el premio realidad 😉');
+              Alert.alert('¡Canje exitoso! 🎊', `Coordiná con ${activeProfile.name === 'Liz' ? 'Martín' : 'Liz'} para hacer realidad tu premio 😉`);
               fetchData();
             }
           }
@@ -176,12 +205,12 @@ export default function PointsScreen() {
         <View style={styles.partnerRow}>
           <View style={styles.partnerCol}>
             <Text style={styles.partnerName}>Liz</Text>
-            <Text style={[styles.partnerPts, { color: theme.colors.elizabeth }]}>{balances.Liz} pts</Text>
+            <Text style={[styles.partnerPts, { color: '#F472B6' }]}>{balances.Liz} pts</Text>
           </View>
           <View style={styles.dividerVertical} />
           <View style={styles.partnerCol}>
             <Text style={styles.partnerName}>Martin</Text>
-            <Text style={[styles.partnerPts, { color: theme.colors.martin }]}>{balances.Martin} pts</Text>
+            <Text style={[styles.partnerPts, { color: '#60A5FA' }]}>{balances.Martin} pts</Text>
           </View>
         </View>
       </View>
@@ -224,17 +253,34 @@ export default function PointsScreen() {
       {redemptions.length > 0 && (
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Sparkles size={18} color={theme.colors.textSecondary} />
-            <Text style={styles.historyTitle}>Últimos canjes</Text>
+            <Sparkles size={18} color={theme.colors.primary} />
+            <Text style={styles.sectionTitle}>Canjes recientes</Text>
           </View>
-          {redemptions.map((red, i) => (
-            <View key={i} style={styles.historyItem}>
-              <CheckCircle2 size={16} color="#10B981" />
-              <Text style={styles.historyText}>
-                <Text style={{fontWeight: '700'}}>{red.profiles?.name}</Text> canjeó <Text style={{fontWeight: '600'}}>{red.rewards?.name}</Text> por {red.points_cost} pts
-              </Text>
-            </View>
-          ))}
+          <View style={styles.historyCard}>
+            {redemptions.map((red, i) => {
+              const isLiz = red.profiles?.name === 'Liz';
+              const nameColor = isLiz ? theme.colors.primary : '#5D4037';
+              const timeAgo = red.created_at
+                ? formatDistanceToNow(parseISO(red.created_at), { addSuffix: true, locale: es })
+                : '';
+              return (
+                <View key={i} style={[styles.historyItem, i < redemptions.length - 1 && styles.historyItemBorder]}>
+                  <View style={[styles.historyDot, { backgroundColor: nameColor }]} />
+                  <View style={styles.historyInfo}>
+                    <Text style={styles.historyText}>
+                      <Text style={[styles.historyName, { color: nameColor }]}>{red.profiles?.name}</Text>
+                      {' canjeó '}
+                      <Text style={styles.historyReward}>{red.rewards?.name ?? '?'}</Text>
+                    </Text>
+                    <View style={styles.historyMeta}>
+                      <Text style={styles.historyPts}>-{red.points_cost} pts</Text>
+                      {timeAgo !== '' && <Text style={styles.historyTime}>{timeAgo}</Text>}
+                    </View>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
         </View>
       )}
     </ScrollView>
@@ -298,6 +344,19 @@ const styles = StyleSheet.create({
   redeemTextDisabled: { color: theme.colors.textSecondary },
 
   historyTitle: { fontSize: 16, fontWeight: '700', color: theme.colors.textSecondary },
-  historyItem: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(0,0,0,0.05)' },
-  historyText: { fontSize: 13, color: '#444', flex: 1, lineHeight: 18 },
+  historyCard: {
+    backgroundColor: '#FFF', borderRadius: 16, overflow: 'hidden',
+    borderWidth: 1, borderColor: 'rgba(139,69,19,0.06)',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
+  },
+  historyItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 16 },
+  historyItemBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(0,0,0,0.07)' },
+  historyDot: { width: 10, height: 10, borderRadius: 5, flexShrink: 0 },
+  historyInfo: { flex: 1 },
+  historyText: { fontSize: 14, color: '#444', lineHeight: 20 },
+  historyName: { fontWeight: '700', fontSize: 14 },
+  historyReward: { fontStyle: 'italic', fontSize: 14 },
+  historyMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  historyPts: { fontSize: 12, fontWeight: '700', color: '#E53E3E', backgroundColor: '#FFF5F5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  historyTime: { fontSize: 12, color: theme.colors.textSecondary },
 });

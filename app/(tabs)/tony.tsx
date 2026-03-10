@@ -7,8 +7,9 @@ import { useProfileStore } from '../../src/store/useProfileStore';
 import { theme } from '../../src/constants/theme';
 import { supabase } from '../../src/lib/supabase';
 import { TonyReminder, TonyReminderType } from '../../src/types/database.types';
-import { Check, Plus, X, Dog, Bone } from 'lucide-react-native';
-import { format } from 'date-fns';
+import { Check, Plus, X, Bone } from 'lucide-react-native';
+import { format, parseISO } from 'date-fns';
+import { es } from 'date-fns/locale';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const REMINDER_TYPES: { key: TonyReminderType; label: string; emoji: string }[] = [
@@ -63,7 +64,52 @@ export default function TonyScreen() {
     if (!error) fetchReminders();
   };
 
+  const profileColor = theme.colors.primary;
+
+  const clearCompleted = async () => {
+    const completed = reminders.filter(r => r.status === 'completed');
+    if (completed.length === 0) return;
+    Alert.alert(
+      'Limpiar completados',
+      `¿Eliminar ${completed.length} recordatorio${completed.length > 1 ? 's' : ''} completado${completed.length > 1 ? 's' : ''}?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Limpiar', style: 'destructive', onPress: async () => {
+          const ids = completed.map(r => r.id);
+          await supabase.from('tony_reminders').delete().in('id', ids);
+          fetchReminders();
+        }}
+      ]
+    );
+  };
+
+  const handleDeleteReminder = (item: TonyReminder) => {
+    Alert.alert(
+      'Eliminar recordatorio',
+      `¿Eliminar este recordatorio de ${getTypeInfo(item.type).label.toLowerCase()}?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase.from('tony_reminders').delete().eq('id', item.id);
+            if (!error) fetchReminders();
+          }
+        }
+      ]
+    );
+  };
+
   const getTypeInfo = (key: TonyReminderType) => REMINDER_TYPES.find(t => t.key === key) ?? { label: key, emoji: '🐶' };
+
+  const formatDate = (dateStr: string) => {
+    try {
+      return format(parseISO(dateStr), "d 'de' MMMM", { locale: es });
+    } catch {
+      return dateStr;
+    }
+  };
 
   const renderItem = ({ item }: { item: TonyReminder }) => {
     const isCompleted = item.status === 'completed';
@@ -72,6 +118,7 @@ export default function TonyScreen() {
       <TouchableOpacity
         style={[styles.item, isCompleted && styles.itemDone]}
         onPress={() => toggleStatus(item)}
+        onLongPress={() => handleDeleteReminder(item)}
         activeOpacity={0.7}
       >
         <Text style={styles.itemEmoji}>{info.emoji}</Text>
@@ -79,7 +126,7 @@ export default function TonyScreen() {
           <Text style={[styles.itemName, isCompleted && styles.itemNameDone]} numberOfLines={1}>
             {info.label}
           </Text>
-          <Text style={styles.itemDate}>{item.reminder_date}</Text>
+          <Text style={styles.itemDate}>{formatDate(item.reminder_date)}</Text>
         </View>
         <View style={[styles.checkbox, isCompleted && styles.checkboxDone]}>
           {isCompleted && <Check size={12} color="#FFF" strokeWidth={3} />}
@@ -93,12 +140,19 @@ export default function TonyScreen() {
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerTitle}>🐶 Tony</Text>
-          <Text style={styles.headerSub}>Recordatorios del peludito</Text>
+          <Text style={styles.headerTitle}>🐷 Tony</Text>
+          <Text style={styles.headerSub}>Recordatorios del chancho</Text>
         </View>
-        <TouchableOpacity style={styles.addBtn} onPress={() => setIsModalVisible(true)}>
-          <Plus size={22} color="#FFF" />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+          {reminders.some(r => r.status === 'completed') && (
+            <TouchableOpacity style={styles.clearBtn} onPress={clearCompleted}>
+              <Text style={styles.clearBtnText}>Limpiar ✓</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={[styles.addBtn, { backgroundColor: profileColor }]} onPress={() => setIsModalVisible(true)}>
+            <Plus size={22} color="#FFF" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {reminders.length === 0 ? (
@@ -221,4 +275,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
   },
   saveBtnText: { fontSize: 16, fontWeight: '700', color: '#FFF' },
+  clearBtn: {
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
+    backgroundColor: 'rgba(139,69,19,0.08)', borderWidth: 1, borderColor: 'rgba(139,69,19,0.15)',
+  },
+  clearBtnText: { fontSize: 13, fontWeight: '600', color: theme.colors.textSecondary },
 });

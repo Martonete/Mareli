@@ -29,10 +29,20 @@ export default function SettingsScreen() {
     );
   };
 
+  const profileColor = theme.colors.primary;
+
   const menuItems = [
-    { icon: Bell, label: 'Notificaciones', sub: 'Configurar alertas', onPress: () => {} },
-    { icon: Shield, label: 'Privacidad', sub: 'Gestionar privacidad', onPress: () => {} },
-    { icon: Info, label: 'Acerca de', sub: 'Versión 1.0.0', onPress: () => {} },
+    { icon: Bell, label: 'Notificaciones', sub: 'Se envían automáticamente al otro perfil', onPress: () => {} },
+    { icon: Shield, label: 'Privacidad', sub: 'Solo Liz y Martín tienen acceso', onPress: () => {} },
+    {
+      icon: Info, label: 'Acerca de', sub: 'Versión 1.0.0', onPress: () => {
+        Alert.alert(
+          '🏠 Casa en Orden',
+          'Versión 1.0.0\n\nHecha con amor para Liz y Martín 💑\n\nGestioná tareas, puntos, compras, eventos y los cuidados de Tony desde un solo lugar.',
+          [{ text: 'Cerrar', style: 'cancel' }]
+        );
+      }
+    },
   ];
 
   return (
@@ -45,8 +55,8 @@ export default function SettingsScreen() {
 
       {/* Profile Card */}
       <View style={styles.profileCard}>
-        <View style={styles.avatarBg}>
-          <Text style={styles.avatarLetter}>
+        <View style={[styles.avatarBg, { backgroundColor: profileColor + '22' }]}>
+          <Text style={[styles.avatarLetter, { color: profileColor }]}>
             {activeProfile?.name?.charAt(0) ?? '?'}
           </Text>
         </View>

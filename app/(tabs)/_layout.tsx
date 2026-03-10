@@ -1,12 +1,10 @@
 import { Tabs } from 'expo-router';
 import { Home, ListTodo, Trophy, ShoppingCart, Calendar, Dog, Settings } from 'lucide-react-native';
 import { theme } from '../../src/constants/theme';
-import { useProfileStore } from '../../src/store/useProfileStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TabsLayout() {
-  const { activeProfile } = useProfileStore();
-  const tabColor = activeProfile?.name === 'Liz' ? theme.colors.elizabeth : theme.colors.martin;
+  const tabColor = theme.colors.primary;
   const insets = useSafeAreaInsets();
 
   // The tab bar height includes the bottom safe area inset (handles Android gesture bar / 3-button nav)
@@ -19,9 +17,14 @@ export default function TabsLayout() {
         tabBarInactiveTintColor: theme.colors.textSecondary,
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: theme.colors.surface,
-          borderTopWidth: 0,
-          ...theme.shadows.floating,
+          backgroundColor: '#FEFCF7',
+          borderTopWidth: 1,
+          borderTopColor: 'rgba(139,69,19,0.1)',
+          shadowColor: '#8B4513',
+          shadowOffset: { width: 0, height: -4 },
+          shadowOpacity: 0.08,
+          shadowRadius: 12,
+          elevation: 8,
           height: tabBarHeight,
           paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
           paddingTop: 8,

@@ -62,6 +62,12 @@ export default function TasksScreen() {
     fetchTasks();
     fetchTaskTypes();
     fetchProfiles();
+
+    const channel = supabase.channel('tasks_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchTasks())
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [fetchTasks, fetchTaskTypes, fetchProfiles]);
 
   const syncDefaultTasks = async () => {
@@ -103,7 +109,7 @@ export default function TasksScreen() {
   };
 
   const handleConfirmComplete = async (assignee: string | 'ambos') => {
-    if (!taskToComplete) return;
+    if (!taskToComplete || !activeProfile) return;
 
     if (assignee === 'ambos') {
       if (profiles.length < 2) {
@@ -226,7 +232,8 @@ export default function TasksScreen() {
       <TouchableOpacity
         style={[styles.taskItem, isCompleted && styles.taskItemDone]}
         onPress={() => openCompleteModal(item)}
-        disabled={isCompleted}
+        onLongPress={() => handleDeleteTask(item)}
+        disabled={false}
         activeOpacity={0.7}
       >
         <View style={[styles.taskCheck, isCompleted && styles.taskCheckDone]}>
@@ -250,6 +257,26 @@ export default function TasksScreen() {
     );
   };
 
+  const profileColor = theme.colors.primary;
+
+  const handleDeleteTask = (task: TaskWithDetails) => {
+    Alert.alert(
+      'Eliminar tarea',
+      `¿Eliminar "${task.task_types?.name}"?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase.from('tasks').delete().eq('id', task.id);
+            if (!error) fetchTasks();
+          }
+        }
+      ]
+    );
+  };
+
   const FILTERS: { key: 'all' | 'pending' | 'completed'; label: string }[] = [
     { key: 'all', label: 'Todas' },
     { key: 'pending', label: 'Pendientes' },
@@ -261,7 +288,7 @@ export default function TasksScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Tareas</Text>
-        <TouchableOpacity style={styles.addBtn} onPress={() => setIsModalVisible(true)}>
+        <TouchableOpacity style={[styles.addBtn, { backgroundColor: profileColor }]} onPress={() => setIsModalVisible(true)}>
           <Plus size={22} color="#FFF" />
         </TouchableOpacity>
       </View>
@@ -277,7 +304,7 @@ export default function TasksScreen() {
           return (
             <TouchableOpacity
               key={f.key}
-              style={[styles.filterChip, filter === f.key && styles.filterChipActive]}
+              style={[styles.filterChip, filter === f.key && { backgroundColor: profileColor, borderColor: profileColor }]}
               onPress={() => setFilter(f.key)}
             >
               <Text style={[styles.filterText, filter === f.key && styles.filterTextActive]}>

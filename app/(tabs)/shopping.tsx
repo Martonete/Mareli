@@ -28,7 +28,17 @@ export default function ShoppingScreen() {
   };
 
   const onRefresh = async () => { setRefreshing(true); await fetchItems(); setRefreshing(false); };
-  useEffect(() => { fetchItems(); }, []);
+  useEffect(() => { 
+    fetchItems(); 
+
+    const channel = supabase.channel('shopping_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items' }, () => {
+        fetchItems();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
 
   const handleAddItem = async () => {
     if (!newItem.trim() || !activeProfile) return;
@@ -41,6 +51,44 @@ export default function ShoppingScreen() {
     notifyOtherUser(activeProfile.name, '🛒 Lista de compras', `${activeProfile.name.split(' ')[0]} agregó "${newItem.trim()}" a la lista.`);
     setNewItem('');
     fetchItems();
+  };
+
+  const profileColor = theme.colors.primary;
+
+  const handleDeleteItem = (item: ShoppingItem) => {
+    Alert.alert(
+      'Eliminar ítem',
+      `¿Eliminar "${item.name}" de la lista?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase.from('shopping_items').delete().eq('id', item.id);
+            if (!error) fetchItems();
+          }
+        }
+      ]
+    );
+  };
+
+  const clearResolved = async () => {
+    Alert.alert(
+      'Limpiar completados',
+      '¿Eliminar todos los ítems ya comprados?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Limpiar',
+          style: 'destructive',
+          onPress: async () => {
+            await supabase.from('shopping_items').delete().eq('status', 'resolved');
+            fetchItems();
+          }
+        }
+      ]
+    );
   };
 
   const toggleStatus = async (item: ShoppingItem) => {
@@ -59,6 +107,7 @@ export default function ShoppingScreen() {
       <TouchableOpacity
         style={[styles.item, isResolved && styles.itemResolved]}
         onPress={() => toggleStatus(item)}
+        onLongPress={() => handleDeleteItem(item)}
         activeOpacity={0.7}
       >
         <View style={[styles.checkbox, isResolved && styles.checkboxChecked]}>
@@ -85,8 +134,15 @@ export default function ShoppingScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Compras</Text>
-        <Text style={styles.headerSub}>{pending.length} pendientes</Text>
+        <View>
+          <Text style={styles.headerTitle}>Compras</Text>
+          <Text style={styles.headerSub}>{pending.length} pendientes</Text>
+        </View>
+        {resolved.length > 0 && (
+          <TouchableOpacity onPress={clearResolved} style={styles.clearBtn}>
+            <Text style={styles.clearBtnText}>Limpiar ✓</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Input */}
@@ -100,7 +156,7 @@ export default function ShoppingScreen() {
           onSubmitEditing={handleAddItem}
           returnKeyType="done"
         />
-        <TouchableOpacity style={styles.addBtn} onPress={handleAddItem}>
+        <TouchableOpacity style={[styles.addBtn, { backgroundColor: profileColor }]} onPress={handleAddItem}>
           <Plus size={20} color="#FFF" />
         </TouchableOpacity>
       </View>
@@ -126,9 +182,11 @@ export default function ShoppingScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
-  header: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4 },
+  header: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerTitle: { fontSize: 26, fontWeight: '700', color: theme.colors.text, letterSpacing: -0.5 },
   headerSub: { fontSize: 13, color: theme.colors.textSecondary, marginTop: 2, fontWeight: '500' },
+  clearBtn: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(16,185,129,0.12)', borderRadius: 20 },
+  clearBtnText: { fontSize: 12, fontWeight: '700', color: theme.colors.success },
   inputRow: {
     flexDirection: 'row', gap: 10, paddingHorizontal: 20,
     paddingVertical: 14, alignItems: 'center',

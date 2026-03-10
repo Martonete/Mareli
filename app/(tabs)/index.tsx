@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, RefreshControl,
-  TouchableOpacity, Platform, StatusBar, Modal, TextInput, Alert, Animated, PanResponder, Dimensions
+  TouchableOpacity, Platform, StatusBar, Modal, TextInput, Alert
 } from 'react-native';
 import { useProfileStore } from '../../src/store/useProfileStore';
 import { theme } from '../../src/constants/theme';
@@ -10,57 +10,37 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Bell, ShoppingCart, FileText, ChevronRight, Home, Sparkles, Plus, X, CalendarDays
 } from 'lucide-react-native';
-import { startOfWeek, endOfWeek, format, parseISO, addDays } from 'date-fns';
+import { format, parseISO, addDays, formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useFocusEffect } from 'expo-router';
 import { notifyOtherUser } from '../../src/lib/notifications';
 
-// Componente para deslizar y borrar la nota
-const SwipeableNote = ({ note, activeProfileId, onDelete }: { note: any, activeProfileId: string | undefined, onDelete: (id: string) => void }) => {
-  const pan = React.useRef(new Animated.ValueXY()).current;
-  const isCreator = note.created_by_profile_id === activeProfileId;
+const parseNoteContent = (raw: string): { current: string; history: string[] } => {
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === 'object' && parsed?.current)
+      return { current: parsed.current, history: Array.isArray(parsed.history) ? parsed.history : [] };
+  } catch {}
+  return { current: raw, history: [] };
+};
 
-  const panResponder = React.useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (evt, gestureState) => {
-        return isCreator && Math.abs(gestureState.dx) > 10 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
-      },
-      onPanResponderMove: (evt, gestureState) => {
-        if (gestureState.dx < 0) {
-           pan.setValue({ x: gestureState.dx, y: 0 });
-        }
-      },
-      onPanResponderRelease: (evt, gestureState) => {
-        if (gestureState.dx < -80) {
-           Animated.timing(pan, { toValue: { x: -Dimensions.get('window').width, y: 0 }, duration: 250, useNativeDriver: true }).start(() => {
-              onDelete(note.id);
-           });
-        } else {
-           Animated.spring(pan, { toValue: { x: 0, y: 0 }, useNativeDriver: true }).start();
-        }
-      }
-    })
-  ).current;
-
+const NoteCard = ({ note, onEdit }: { note: any; onEdit: (note: any) => void }) => {
+  const { current, history } = parseNoteContent(note.content ?? '');
   const noteDate = note.created_at ? format(parseISO(note.created_at), 'dd/MM/yyyy') : '';
-
   return (
-    <View style={styles.swipeContainer}>
-      <View style={styles.deleteBackground}>
-        <Text style={styles.deleteText}>Eliminar</Text>
-      </View>
-      <Animated.View 
-        style={[styles.noteCard, { transform: [{ translateX: pan.x }] }]} 
-        {...panResponder.panHandlers}
-      >
-        <Text style={styles.noteText} numberOfLines={3}>
-          {note.content || 'Sin contenido'}
-        </Text>
-        {note.profiles?.name && (
-          <Text style={styles.noteAuthor}>— {note.profiles.name} {noteDate ? `- ${noteDate}` : ''}</Text>
-        )}
-      </Animated.View>
-    </View>
+    <TouchableOpacity style={styles.noteCard} onPress={() => onEdit(note)} activeOpacity={0.75}>
+      <Text style={styles.noteText} numberOfLines={4}>{current || 'Sin contenido'}</Text>
+      {history.length > 0 && (
+        <View style={styles.noteHistory}>
+          {history.slice(0, 2).map((prev, i) => (
+            <Text key={i} style={styles.noteHistoryText} numberOfLines={2}>↩ {prev}</Text>
+          ))}
+        </View>
+      )}
+      {note.profiles?.name && (
+        <Text style={styles.noteAuthor}>— {note.profiles.name}{noteDate ? ` · ${noteDate}` : ''}</Text>
+      )}
+    </TouchableOpacity>
   );
 };
 
@@ -73,8 +53,11 @@ export default function DashboardScreen() {
   const [recentNotes, setRecentNotes] = useState<any[]>([]);
   const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
   const [points, setPoints] = useState({ Liz: 0, Martin: 0 });
+  const [recentRedemptions, setRecentRedemptions] = useState<any[]>([]);
   const [isNoteModalVisible, setIsNoteModalVisible] = useState(false);
   const [newNoteContent, setNewNoteContent] = useState('');
+  const [editingNote, setEditingNote] = useState<any | null>(null);
+  const [editContent, setEditContent] = useState('');
 
   const fetchData = async () => {
     const [
@@ -83,6 +66,7 @@ export default function DashboardScreen() {
       { data: notes, error: e3 },
       { data: ptsData, error: e4 },
       { data: eventsData, error: e5 },
+      { data: redemptionsData },
     ] = await Promise.all([
       supabase
         .from('tasks')
@@ -99,9 +83,8 @@ export default function DashboardScreen() {
       supabase
         .from('notes')
         .select('*, profiles!notes_created_by_profile_id_fkey(name)')
-        .gte('created_at', startOfWeek(new Date(), { weekStartsOn: 1 }).toISOString())
-        .lte('created_at', endOfWeek(new Date(), { weekStartsOn: 1 }).toISOString())
-        .order('created_at', { ascending: false }),
+        .order('created_at', { ascending: false })
+        .limit(5),
       supabase
         .from('tasks')
         .select('points_awarded, profiles!tasks_completed_by_profile_id_fkey(name)')
@@ -114,14 +97,13 @@ export default function DashboardScreen() {
         .order('event_date', { ascending: true }),
       supabase
         .from('reward_redemptions')
-        .select('points_cost, profiles(name)'),
+        .select('points_cost, profiles(name), rewards(name), created_at')
+        .order('created_at', { ascending: false }),
     ]);
     if (e1) console.error('tasks error:', e1.message);
     if (e2) console.error('shopping error:', e2.message);
     if (e3) console.error('notes error:', e3.message);
     if (e5) console.error('events error:', e5.message);
-    const e6 = arguments.length > 0 && arguments[0] ? arguments[0][5]?.error : null; // Safe ignore or check
-    const redemptionsData = arguments.length > 0 && arguments[0] ? arguments[0][5]?.data : null;
     if (tasks) setRecentTasks(tasks);
     if (items) setPendingShopping(items);
     if (notes) setRecentNotes(notes);
@@ -129,18 +111,17 @@ export default function DashboardScreen() {
     if (ptsData) {
       let eliPts = 0, marPts = 0;
       ptsData.forEach((t: any) => {
-        if (t.profiles?.name === 'Elizabeth' || t.profiles?.name === 'Liz') eliPts += (t.points_awarded || 0);
+        if (t.profiles?.name === 'Liz') eliPts += (t.points_awarded || 0);
         if (t.profiles?.name === 'Martin') marPts += (t.points_awarded || 0);
       });
-
       if (redemptionsData) {
         redemptionsData.forEach((r: any) => {
-          if (r.profiles?.name === 'Elizabeth' || r.profiles?.name === 'Liz') eliPts -= (r.points_cost || 0);
+          if (r.profiles?.name === 'Liz') eliPts -= (r.points_cost || 0);
           if (r.profiles?.name === 'Martin') marPts -= (r.points_cost || 0);
         });
       }
-
       setPoints({ Liz: eliPts, Martin: marPts });
+      setRecentRedemptions(redemptionsData?.slice(0, 3) || []);
     }
   };
 
@@ -160,12 +141,27 @@ export default function DashboardScreen() {
     }
   };
 
-  const handleDeleteNote = async (noteId: string) => {
-    const { error } = await supabase.from('notes').delete().eq('id', noteId);
+  const handleOpenEdit = (note: any) => {
+    const { current } = parseNoteContent(note.content ?? '');
+    setEditContent(current);
+    setEditingNote(note);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editContent.trim() || !editingNote) return;
+    const { current, history } = parseNoteContent(editingNote.content ?? '');
+    const changed = current.trim() !== editContent.trim();
+    const newHistory = changed ? [current, ...history].slice(0, 5) : history;
+    const newContent = newHistory.length > 0
+      ? JSON.stringify({ current: editContent.trim(), history: newHistory })
+      : editContent.trim();
+    const { error } = await supabase.from('notes').update({ content: newContent }).eq('id', editingNote.id);
     if (!error) {
+      setEditingNote(null);
+      setEditContent('');
       fetchData();
     } else {
-      Alert.alert('Error', 'No se pudo eliminar la nota');
+      Alert.alert('Error', 'No se pudo guardar la edición');
     }
   };
 
@@ -174,11 +170,31 @@ export default function DashboardScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchData();
+
+      const channel = supabase.channel('dashboard_changes')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchData())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items' }, () => fetchData())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'notes' }, () => fetchData())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'reward_redemptions' }, () => fetchData())
+        .subscribe();
+
+      return () => { supabase.removeChannel(channel); };
     }, [])
   );
 
   const topPadding = insets.top > 0 ? insets.top + 8 : (Platform.OS === 'android' ? (StatusBar.currentHeight ?? 24) + 8 : 20);
   const greeting = activeProfile?.name ? `Hola, ${activeProfile.name.split(' ')[0]} 👋` : 'Hola 👋';
+  const profileColor = theme.colors.primary;
+  const todayLabel = format(new Date(), "EEEE d 'de' MMMM", { locale: es }).replace(/^\w/, c => c.toUpperCase());
+
+  const getTs = (s?: string | null) => s ? new Date(s).getTime() : 0;
+  const dynamicSections = [
+    { key: 'notes', ts: getTs(recentNotes[0]?.created_at) },
+    { key: 'tasks', ts: getTs(recentTasks[0]?.created_at) },
+    { key: 'shopping', ts: getTs(pendingShopping[0]?.created_at) },
+    { key: 'events', ts: upcomingEvents.length > 0 ? Math.max(...upcomingEvents.map((e: any) => getTs(e.created_at))) : 0 },
+    { key: 'redemptions', ts: getTs(recentRedemptions[0]?.created_at) },
+  ].sort((a, b) => b.ts - a.ts);
 
   return (
     <ScrollView
@@ -191,10 +207,10 @@ export default function DashboardScreen() {
       <View style={styles.header}>
         <View>
           <Text style={styles.greeting}>{greeting}</Text>
-          <Text style={styles.headerSub}>Casa en Orden</Text>
+          <Text style={styles.headerSub}>{todayLabel}</Text>
         </View>
-        <View style={styles.headerIcon}>
-          <Home size={22} color={theme.colors.primary} />
+        <View style={[styles.headerIcon, { backgroundColor: profileColor + '18' }]}>
+          <Home size={22} color={profileColor} />
         </View>
       </View>
 
@@ -234,122 +250,146 @@ export default function DashboardScreen() {
           <View style={styles.pointRow}>
             <Text style={styles.pointLabel}>Liz: {points.Liz}</Text>
             <View style={styles.miniBarBg}>
-              <View style={[styles.miniBarFill, { width: `${Math.round((points.Liz / Math.max(points.Liz, points.Martin, 1)) * 100)}%` as any, backgroundColor: theme.colors.elizabeth }]} />
+              <View style={[styles.miniBarFill, { width: `${Math.round((points.Liz / Math.max(points.Liz, points.Martin, 1)) * 100)}%` as any, backgroundColor: '#F472B6' }]} />
             </View>
           </View>
           <View style={styles.pointRow}>
             <Text style={styles.pointLabel}>Martín: {points.Martin}</Text>
             <View style={styles.miniBarBg}>
-              <View style={[styles.miniBarFill, { width: `${Math.round((points.Martin / Math.max(points.Liz, points.Martin, 1)) * 100)}%` as any, backgroundColor: theme.colors.martin }]} />
+              <View style={[styles.miniBarFill, { width: `${Math.round((points.Martin / Math.max(points.Liz, points.Martin, 1)) * 100)}%` as any, backgroundColor: '#60A5FA' }]} />
             </View>
           </View>
         </View>
       </View>
 
-      {/* Notas */}
-      <View style={styles.section}>
-        <View style={[styles.sectionHeader, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
-          <Text style={styles.sectionTitle}>Notas Recientes</Text>
-          <TouchableOpacity onPress={() => setIsNoteModalVisible(true)} style={{ padding: 4, marginRight: -4 }}>
-            <Plus size={20} color={theme.colors.primary} />
-          </TouchableOpacity>
-        </View>
-
-        {recentNotes.length === 0 ? (
-          <View style={styles.emptyRow}>
-            <Sparkles size={16} color="rgba(139,69,19,0.4)" />
-            <Text style={styles.emptyRowText}>No hay notas aún</Text>
-          </View>
-        ) : (
-          recentNotes.map((note, i) => (
-            <SwipeableNote 
-              key={note.id ?? i} 
-              note={note} 
-              activeProfileId={activeProfile?.id} 
-              onDelete={handleDeleteNote} 
-            />
-          ))
-        )}
-      </View>
-
-      {/* Tareas pendientes */}
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Tareas Pendientes</Text>
-        </View>
-
-        {recentTasks.length === 0 ? (
-          <View style={styles.emptyRow}>
-            <Sparkles size={16} color="rgba(139,69,19,0.4)" />
-            <Text style={styles.emptyRowText}>Sin tareas pendientes 🎉</Text>
-          </View>
-        ) : (
-          recentTasks.map((task, i) => (
-            <View key={task.id ?? i} style={styles.listItem}>
-              <View style={styles.listDot} />
-              <Text style={styles.listItemText} numberOfLines={2}>
-                {task.task_types?.name ?? 'Tarea'}
-              </Text>
-              <ChevronRight size={16} color="rgba(139,69,19,0.3)" />
+      {/* Secciones dinámicas - ordenadas por actividad más reciente */}
+      {dynamicSections.map(({ key }) => {
+        if (key === 'notes') return (
+          <View key="notes" style={styles.section}>
+            <View style={[styles.sectionHeader, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+              <Text style={styles.sectionTitle}>Notas Recientes</Text>
+              <TouchableOpacity onPress={() => setIsNoteModalVisible(true)} style={{ padding: 4, marginRight: -4 }}>
+                <Plus size={20} color={theme.colors.primary} />
+              </TouchableOpacity>
             </View>
-          ))
-        )}
-      </View>
-
-      {/* Compras */}
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Lista de Compras</Text>
-        </View>
-
-        {pendingShopping.length === 0 ? (
-          <View style={styles.emptyRow}>
-            <Sparkles size={16} color="rgba(139,69,19,0.4)" />
-            <Text style={styles.emptyRowText}>La alacena está completa 🛒</Text>
-          </View>
-        ) : (
-          pendingShopping.slice(0, 4).map((item, i) => (
-            <View key={item.id ?? i} style={styles.listItem}>
-              <View style={[styles.listDot, { backgroundColor: '#10B981' }]} />
-              <Text style={styles.listItemText} numberOfLines={1}>{item.name}</Text>
-              <ChevronRight size={16} color="rgba(139,69,19,0.3)" />
-            </View>
-          ))
-        )}
-        {pendingShopping.length > 4 && (
-          <Text style={styles.moreText}>+{pendingShopping.length - 4} más en la lista</Text>
-        )}
-      </View>
-
-      {/* Próximos Eventos */}
-      {upcomingEvents.length > 0 && (
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Próximos Eventos</Text>
-          </View>
-          {upcomingEvents.map((event, i) => (
-            <View key={event.id ?? i} style={styles.listItem}>
-              <View style={[styles.listDot, { backgroundColor: theme.colors.primary }]} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.listItemText} numberOfLines={1}>{event.title}</Text>
-                <Text style={styles.eventMeta}>
-                  {format(parseISO(event.event_date + 'T00:00:00'), "EEEE d 'de' MMMM", { locale: es }).replace(/^\w/, c => c.toUpperCase())}
-                  {event.event_time ? ` · ${event.event_time.slice(0, 5)}` : ''}
-                </Text>
+            {recentNotes.length === 0 ? (
+              <View style={styles.emptyRow}>
+                <Sparkles size={16} color="rgba(139,69,19,0.4)" />
+                <Text style={styles.emptyRowText}>No hay notas aún</Text>
               </View>
-              <CalendarDays size={16} color="rgba(139,69,19,0.3)" />
+            ) : (
+              recentNotes.map((note, i) => (
+                <NoteCard key={note.id ?? i} note={note} onEdit={handleOpenEdit} />
+              ))
+            )}
+          </View>
+        );
+        if (key === 'tasks') return (
+          <View key="tasks" style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Tareas Pendientes</Text>
             </View>
-          ))}
-        </View>
-      )}
+            {recentTasks.length === 0 ? (
+              <View style={styles.emptyRow}>
+                <Sparkles size={16} color="rgba(139,69,19,0.4)" />
+                <Text style={styles.emptyRowText}>Sin tareas pendientes 🎉</Text>
+              </View>
+            ) : (
+              recentTasks.map((task, i) => (
+                <View key={task.id ?? i} style={styles.listItem}>
+                  <View style={styles.listDot} />
+                  <Text style={styles.listItemText} numberOfLines={2}>{task.task_types?.name ?? 'Tarea'}</Text>
+                  <ChevronRight size={16} color="rgba(139,69,19,0.3)" />
+                </View>
+              ))
+            )}
+          </View>
+        );
+        if (key === 'shopping') return (
+          <View key="shopping" style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Lista de Compras</Text>
+            </View>
+            {pendingShopping.length === 0 ? (
+              <View style={styles.emptyRow}>
+                <Sparkles size={16} color="rgba(139,69,19,0.4)" />
+                <Text style={styles.emptyRowText}>La alacena está completa 🛒</Text>
+              </View>
+            ) : (
+              pendingShopping.slice(0, 4).map((item, i) => (
+                <View key={item.id ?? i} style={styles.listItem}>
+                  <View style={styles.listDot} />
+                  <Text style={styles.listItemText} numberOfLines={1}>{item.name}</Text>
+                  <ChevronRight size={16} color="rgba(139,69,19,0.3)" />
+                </View>
+              ))
+            )}
+            {pendingShopping.length > 4 && (
+              <Text style={styles.moreText}>+{pendingShopping.length - 4} más en la lista</Text>
+            )}
+          </View>
+        );
+        if (key === 'events' && upcomingEvents.length > 0) return (
+          <View key="events" style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Próximos Eventos</Text>
+            </View>
+            {upcomingEvents.map((event, i) => (
+              <View key={event.id ?? i} style={styles.listItem}>
+                <View style={styles.listDot} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.listItemText} numberOfLines={1}>{event.title}</Text>
+                  <Text style={styles.eventMeta}>
+                    {format(parseISO(event.event_date + 'T00:00:00'), "EEEE d 'de' MMMM", { locale: es }).replace(/^\w/, c => c.toUpperCase())}
+                    {event.event_time ? ` · ${event.event_time.slice(0, 5)}` : ''}
+                  </Text>
+                </View>
+                <CalendarDays size={16} color="rgba(139,69,19,0.3)" />
+              </View>
+            ))}
+          </View>
+        );
+        if (key === 'redemptions' && recentRedemptions.length > 0) return (
+          <View key="redemptions" style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Canjes recientes</Text>
+            </View>
+            {recentRedemptions.map((red, i) => {
+              const timeAgo = red.created_at
+                ? formatDistanceToNow(parseISO(red.created_at), { addSuffix: true, locale: es })
+                : '';
+              return (
+                <View key={i} style={styles.listItem}>
+                  <View style={styles.listDot} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.listItemText} numberOfLines={1}>
+                      <Text style={{ fontWeight: '700' }}>{red.profiles?.name}</Text>
+                      {' canjeó '}
+                      <Text style={{ fontStyle: 'italic' }}>{red.rewards?.name ?? '?'}</Text>
+                    </Text>
+                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 2 }}>
+                      <Text style={{ fontSize: 11, color: theme.colors.primary, fontWeight: '700' }}>-{red.points_cost} pts</Text>
+                      {timeAgo !== '' && <Text style={{ fontSize: 11, color: theme.colors.textSecondary }}>{timeAgo}</Text>}
+                    </View>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        );
+        return null;
+      })}
 
-      {/* Modal Nueva Nota */}
-      <Modal visible={isNoteModalVisible} animationType="slide" transparent>
+      {/* Modal: crear o editar nota */}
+      <Modal visible={isNoteModalVisible || editingNote !== null} animationType="slide" transparent>
         <View style={styles.overlay}>
           <View style={styles.modal}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Nueva Nota</Text>
-              <TouchableOpacity onPress={() => setIsNoteModalVisible(false)} style={styles.closeBtn}>
+              <Text style={styles.modalTitle}>{editingNote ? 'Editar Nota' : 'Nueva Nota'}</Text>
+              <TouchableOpacity
+                onPress={() => { setIsNoteModalVisible(false); setEditingNote(null); setEditContent(''); }}
+                style={styles.closeBtn}
+              >
                 <X size={20} color={theme.colors.primary} />
               </TouchableOpacity>
             </View>
@@ -358,18 +398,18 @@ export default function DashboardScreen() {
               style={[styles.input, styles.textArea]}
               placeholder="Escribí una nota para la casa..."
               placeholderTextColor="rgba(139,69,19,0.35)"
-              value={newNoteContent}
-              onChangeText={setNewNoteContent}
+              value={editingNote ? editContent : newNoteContent}
+              onChangeText={editingNote ? setEditContent : setNewNoteContent}
               multiline
               autoFocus
             />
 
-            <TouchableOpacity 
-              style={[styles.saveBtn, !newNoteContent.trim() && styles.saveBtnDisabled]}
-              onPress={handleSaveNote}
-              disabled={!newNoteContent.trim()}
+            <TouchableOpacity
+              style={[styles.saveBtn, !(editingNote ? editContent : newNoteContent).trim() && styles.saveBtnDisabled]}
+              onPress={editingNote ? handleSaveEdit : handleSaveNote}
+              disabled={!(editingNote ? editContent : newNoteContent).trim()}
             >
-              <Text style={styles.saveBtnText}>Guardar Nota</Text>
+              <Text style={styles.saveBtnText}>{editingNote ? 'Guardar Cambios' : 'Guardar Nota'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -521,27 +561,26 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     fontStyle: 'italic',
   },
-  swipeContainer: {
-    backgroundColor: '#FFF',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(139, 69, 19, 0.06)',
-  },
-  deleteBackground: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#EF4444',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 20,
-  },
-  deleteText: {
-    color: '#FFF',
-    fontWeight: '600',
-  },
   noteCard: {
     paddingHorizontal: 16,
     paddingVertical: 13,
     backgroundColor: '#FFF',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(139, 69, 19, 0.06)',
+  },
+  noteHistory: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(139, 69, 19, 0.1)',
+    gap: 3,
+  },
+  noteHistoryText: {
+    fontSize: 11,
+    color: theme.colors.textSecondary,
+    fontStyle: 'italic',
+    lineHeight: 16,
+    opacity: 0.75,
   },
   noteText: {
     fontSize: 14,

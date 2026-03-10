@@ -91,6 +91,26 @@ export default function CalendarScreen() {
 
   const calendarDays = buildCalendarDays();
 
+  const profileColor = theme.colors.primary;
+
+  const handleDeleteEvent = (event: CalendarEvent) => {
+    Alert.alert(
+      'Eliminar evento',
+      `¿Eliminar "${event.title}"?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase.from('calendar_events').delete().eq('id', event.id);
+            if (!error) fetchEvents();
+          }
+        }
+      ]
+    );
+  };
+
   const getEventsForDate = (date: Date) =>
     events.filter(e => isSameDay(parseISO(e.event_date + 'T00:00:00'), date));
 
@@ -103,7 +123,7 @@ export default function CalendarScreen() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Calendario</Text>
         <TouchableOpacity
-          style={styles.addBtn}
+          style={[styles.addBtn, { backgroundColor: profileColor }]}
           onPress={() => openCreateModal(selectedDate ?? new Date())}
         >
           <Plus size={22} color="#FFF" />
@@ -202,8 +222,8 @@ export default function CalendarScreen() {
               </View>
             ) : (
               selectedEvents.map(event => (
-                <View key={event.id} style={styles.eventCard}>
-                  <View style={styles.eventColorStrip} />
+                <TouchableOpacity key={event.id} style={styles.eventCard} onLongPress={() => handleDeleteEvent(event)} activeOpacity={0.8}>
+                  <View style={[styles.eventColorStrip, { backgroundColor: profileColor }]} />
                   <View style={styles.eventInfo}>
                     <Text style={styles.eventTitle} numberOfLines={2}>{event.title}</Text>
                     {event.event_time && (
@@ -216,7 +236,7 @@ export default function CalendarScreen() {
                       <Text style={styles.eventDesc} numberOfLines={2}>{event.description}</Text>
                     )}
                   </View>
-                </View>
+                </TouchableOpacity>
               ))
             )}
           </View>

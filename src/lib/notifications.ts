@@ -33,6 +33,42 @@ export async function registerForPushNotificationsAsync() {
 
   let token;
 
+  if (Platform.OS === 'web') {
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        console.log('El navegador no soporta Push Notifications nativas.');
+        return undefined;
+      }
+      
+      const registration = await navigator.serviceWorker.register('/service-worker.js');
+      let subscription = await registration.pushManager.getSubscription();
+      
+      if (!subscription) {
+        // Llave pública generada para CasaEnOrden
+        const VAPID_PUBLIC_KEY = 'BDEF1RWXIIYS9aBKRbOzyn3yhkbYecCjP4Jg3yZRhr_iw6s6QvEmoGsLa7k6pW8i7wOzWvrmQCk3brKnPj2cpbg';
+        
+        // Conversión a Binario Uint8Array
+        const padding = '='.repeat((4 - VAPID_PUBLIC_KEY.length % 4) % 4);
+        const base64 = (VAPID_PUBLIC_KEY + padding).replace(/\-/g, '+').replace(/_/g, '/');
+        const rawData = window.atob(base64);
+        const applicationServerKey = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) applicationServerKey[i] = rawData.charCodeAt(i);
+
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey
+        });
+      }
+      
+      // Convertimos la subscripción de la web en string para guardarla en supabase
+      return JSON.stringify(subscription);
+    } catch (e) {
+      console.error('Error registrando Web Push:', e);
+      return undefined;
+    }
+  }
+
+  // --- Lógica NATIVA (Expo / Android) ---
   if (Platform.OS === 'android') {
     Notifications?.setNotificationChannelAsync('default', {
       name: 'default',
@@ -63,7 +99,7 @@ export async function registerForPushNotificationsAsync() {
       });
       token = tokenResponse?.data;
     } catch (e) {
-      console.log('Error obteniendo push token', e);
+      console.log('Error obteniendo push token nativo', e);
     }
   } else {
     // Es un emulador
@@ -79,30 +115,48 @@ export async function registerForPushNotificationsAsync() {
  * @param title Título de la notificación
  * @param body Cuerpo o texto del mensaje
  */
-export async function sendPushNotification(expoPushToken: string, title: string, body: string, data = {}) {
-  // Verificamos si es un token de expo válido simple
-  if (!expoPushToken || !expoPushToken.includes('ExponentPushToken')) return;
+export async function sendPushNotification(pushToken: string, title: string, body: string, data = {}) {
+  if (!pushToken) return;
 
-  const message = {
-    to: expoPushToken,
-    sound: 'default',
-    title: title,
-    body: body,
-    data: data,
-  };
+  // 1. Si el token tiene formato de Expo, usamos el servidor de Expo (Para Android)
+  if (pushToken.includes('ExponentPushToken')) {
+    const message = {
+      to: pushToken,
+      sound: 'default',
+      title: title,
+      body: body,
+      data: data,
+    };
 
-  try {
-    await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Accept-encoding': 'gzip, deflate',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(message),
-    });
-  } catch (error) {
-    console.error('Error enviando notificación push:', error);
+    try {
+      await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Accept-encoding': 'gzip, deflate',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(message),
+      });
+    } catch (error) {
+      console.error('Error enviando notificación push Expo:', error);
+    }
+    return;
+  }
+
+  // 2. Si el token es un objeto JSON (Web Push Subscription Safari/Chrome), llamamos a nuestro propio backend (Edge Function)
+  if (pushToken.startsWith('{')) {
+    try {
+      const subscription = JSON.parse(pushToken);
+      
+      const { error } = await supabase.functions.invoke('send-web-push', {
+        body: { subscription, title, body, data }
+      });
+
+      if (error) console.error('Supabase Edge Function Error:', error);
+    } catch (error) {
+      console.error('Error enviando notificación Web Push:', error);
+    }
   }
 }
 
