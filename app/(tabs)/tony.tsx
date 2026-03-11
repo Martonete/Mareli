@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Modal, Alert, RefreshControl,
+  Modal, RefreshControl,
 } from 'react-native';
 import { useProfileStore } from '../../src/store/useProfileStore';
 import { theme } from '../../src/constants/theme';
@@ -49,7 +49,7 @@ export default function TonyScreen() {
       reminder_date: format(new Date(), 'yyyy-MM-dd'),
       created_by_profile_id: activeProfile?.id,
     });
-    if (error) { Alert.alert('Error', 'No se pudo crear el recordatorio'); return; }
+    if (error) { alert('No se pudo crear el recordatorio'); return; }
     setIsModalVisible(false);
     fetchReminders();
   };
@@ -65,40 +65,31 @@ export default function TonyScreen() {
   };
 
   const profileColor = theme.colors.primary;
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [pendingDeleteReminder, setPendingDeleteReminder] = useState<TonyReminder | null>(null);
 
-  const clearCompleted = async () => {
+  const clearCompleted = () => {
     const completed = reminders.filter(r => r.status === 'completed');
     if (completed.length === 0) return;
-    Alert.alert(
-      'Limpiar completados',
-      `¿Eliminar ${completed.length} recordatorio${completed.length > 1 ? 's' : ''} completado${completed.length > 1 ? 's' : ''}?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Limpiar', style: 'destructive', onPress: async () => {
-          const ids = completed.map(r => r.id);
-          await supabase.from('tony_reminders').delete().in('id', ids);
-          fetchReminders();
-        }}
-      ]
-    );
+    setShowClearConfirm(true);
+  };
+
+  const confirmClearCompleted = async () => {
+    const ids = reminders.filter(r => r.status === 'completed').map(r => r.id);
+    setShowClearConfirm(false);
+    await supabase.from('tony_reminders').delete().in('id', ids);
+    fetchReminders();
   };
 
   const handleDeleteReminder = (item: TonyReminder) => {
-    Alert.alert(
-      'Eliminar recordatorio',
-      `¿Eliminar este recordatorio de ${getTypeInfo(item.type).label.toLowerCase()}?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            const { error } = await supabase.from('tony_reminders').delete().eq('id', item.id);
-            if (!error) fetchReminders();
-          }
-        }
-      ]
-    );
+    setPendingDeleteReminder(item);
+  };
+
+  const confirmDeleteReminder = async () => {
+    if (!pendingDeleteReminder) return;
+    const { error } = await supabase.from('tony_reminders').delete().eq('id', pendingDeleteReminder.id);
+    setPendingDeleteReminder(null);
+    if (!error) fetchReminders();
   };
 
   const getTypeInfo = (key: TonyReminderType) => REMINDER_TYPES.find(t => t.key === key) ?? { label: key, emoji: '🐶' };
@@ -170,6 +161,46 @@ export default function TonyScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
         />
       )}
+
+      {/* Modal confirmar limpiar completados */}
+      <Modal visible={showClearConfirm} animationType="fade" transparent>
+        <View style={styles.overlayCenter}>
+          <View style={styles.confirmModal}>
+            <Text style={styles.confirmTitle}>Limpiar completados</Text>
+            <Text style={styles.confirmSub}>
+              ¿Eliminar {reminders.filter(r => r.status === 'completed').length} recordatorio(s) completado(s)?
+            </Text>
+            <View style={styles.confirmBtns}>
+              <TouchableOpacity style={styles.cancelConfirmBtn} onPress={() => setShowClearConfirm(false)}>
+                <Text style={styles.cancelConfirmText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.deleteConfirmBtn} onPress={confirmClearCompleted}>
+                <Text style={styles.deleteConfirmText}>Limpiar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal confirmar eliminar recordatorio */}
+      <Modal visible={!!pendingDeleteReminder} animationType="fade" transparent>
+        <View style={styles.overlayCenter}>
+          <View style={styles.confirmModal}>
+            <Text style={styles.confirmTitle}>Eliminar recordatorio</Text>
+            <Text style={styles.confirmSub}>
+              ¿Eliminar este recordatorio de {pendingDeleteReminder ? getTypeInfo(pendingDeleteReminder.type).label.toLowerCase() : ''}?
+            </Text>
+            <View style={styles.confirmBtns}>
+              <TouchableOpacity style={styles.cancelConfirmBtn} onPress={() => setPendingDeleteReminder(null)}>
+                <Text style={styles.cancelConfirmText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.deleteConfirmBtn} onPress={confirmDeleteReminder}>
+                <Text style={styles.deleteConfirmText}>Eliminar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Modal */}
       <Modal visible={isModalVisible} animationType="slide" transparent>
@@ -280,4 +311,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(139,69,19,0.08)', borderWidth: 1, borderColor: 'rgba(139,69,19,0.15)',
   },
   clearBtnText: { fontSize: 13, fontWeight: '600', color: theme.colors.textSecondary },
+  overlayCenter: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  confirmModal: { backgroundColor: '#FFF', borderRadius: 24, padding: 24, width: '100%', maxWidth: 340, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 10 },
+  confirmTitle: { fontSize: 20, fontWeight: '700', color: theme.colors.text, textAlign: 'center' },
+  confirmSub: { fontSize: 14, color: theme.colors.textSecondary, marginTop: 4, marginBottom: 24, textAlign: 'center' },
+  confirmBtns: { width: '100%', gap: 10 },
+  cancelConfirmBtn: { paddingVertical: 14, alignItems: 'center', borderRadius: 14, backgroundColor: 'rgba(139,69,19,0.08)' },
+  cancelConfirmText: { fontSize: 15, fontWeight: '600', color: theme.colors.textSecondary },
+  deleteConfirmBtn: { paddingVertical: 14, alignItems: 'center', borderRadius: 14, backgroundColor: '#EF4444' },
+  deleteConfirmText: { fontSize: 16, fontWeight: '700', color: '#FFF' },
 });

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, SectionList, TouchableOpacity,
-  TextInput, Alert, RefreshControl, Modal,
+  TextInput, RefreshControl, Modal,
 } from 'react-native';
 import { useProfileStore } from '../../src/store/useProfileStore';
 import { theme } from '../../src/constants/theme';
@@ -53,7 +53,7 @@ export default function ShoppingScreen() {
       created_by_profile_id: activeProfile.id,
     }));
     const { error } = await supabase.from('shopping_items').insert(rows);
-    if (error) { Alert.alert('Error', 'No se pudo agregar'); return; }
+    if (error) { alert('No se pudo agregar'); return; }
 
     const label = lines.length === 1
       ? `"${lines[0]}"`

@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Modal, TextInput, Alert, ScrollView, FlatList,
+  Modal, TextInput, ScrollView,
 } from 'react-native';
 import { useProfileStore } from '../../src/store/useProfileStore';
 import { theme } from '../../src/constants/theme';
@@ -56,7 +56,7 @@ export default function CalendarScreen() {
 
   const handleCreateEvent = async () => {
     if (!title.trim() || !activeProfile || !selectedDate) {
-      Alert.alert('Atención', 'Completá el título y seleccioná un día');
+      alert('Completá el título y seleccioná un día');
       return;
     }
     const { error } = await supabase.from('calendar_events').insert({
@@ -67,7 +67,7 @@ export default function CalendarScreen() {
       created_by_profile_id: activeProfile.id,
     });
     if (error) {
-      Alert.alert('Error', error.message);
+      alert(error.message);
       return;
     }
     notifyOtherUser(activeProfile.id, '📅 Nuevo evento', `${activeProfile.name.split(' ')[0]} agendó "${title.trim()}" para el ${format(selectedDate, 'dd/MM')}.`);
@@ -76,8 +76,8 @@ export default function CalendarScreen() {
     fetchEvents();
   };
 
-  // Build calendar grid
-  const buildCalendarDays = () => {
+  // Build calendar grid (memoized)
+  const calendarDays = useMemo(() => {
     const start = startOfWeek(startOfMonth(currentMonth), { weekStartsOn: 0 });
     const end = endOfWeek(endOfMonth(currentMonth), { weekStartsOn: 0 });
     const days: Date[] = [];
@@ -87,28 +87,21 @@ export default function CalendarScreen() {
       d = addDays(d, 1);
     }
     return days;
-  };
-
-  const calendarDays = buildCalendarDays();
+  }, [currentMonth]);
 
   const profileColor = theme.colors.primary;
 
+  const [pendingDeleteEvent, setPendingDeleteEvent] = useState<CalendarEvent | null>(null);
+
   const handleDeleteEvent = (event: CalendarEvent) => {
-    Alert.alert(
-      'Eliminar evento',
-      `¿Eliminar "${event.title}"?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            const { error } = await supabase.from('calendar_events').delete().eq('id', event.id);
-            if (!error) fetchEvents();
-          }
-        }
-      ]
-    );
+    setPendingDeleteEvent(event);
+  };
+
+  const confirmDeleteEvent = async () => {
+    if (!pendingDeleteEvent) return;
+    const { error } = await supabase.from('calendar_events').delete().eq('id', pendingDeleteEvent.id);
+    setPendingDeleteEvent(null);
+    if (!error) fetchEvents();
   };
 
   const getEventsForDate = (date: Date) =>
@@ -242,6 +235,24 @@ export default function CalendarScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Modal confirmar eliminar evento */}
+      <Modal visible={!!pendingDeleteEvent} animationType="fade" transparent>
+        <View style={styles.overlayCenter}>
+          <View style={styles.confirmModal}>
+            <Text style={styles.confirmTitle}>Eliminar evento</Text>
+            <Text style={styles.confirmSub}>¿Eliminar "{pendingDeleteEvent?.title}"?</Text>
+            <View style={styles.confirmBtns}>
+              <TouchableOpacity style={styles.cancelConfirmBtn} onPress={() => setPendingDeleteEvent(null)}>
+                <Text style={styles.cancelConfirmText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.deleteConfirmBtn} onPress={confirmDeleteEvent}>
+                <Text style={styles.deleteConfirmText}>Eliminar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Modal crear evento */}
       <Modal visible={isModalVisible} animationType="slide" transparent>
@@ -418,4 +429,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
   },
   saveBtnText: { fontSize: 16, fontWeight: '700', color: '#FFF' },
+  overlayCenter: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  confirmModal: { backgroundColor: '#FFF', borderRadius: 24, padding: 24, width: '100%', maxWidth: 340, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 10 },
+  confirmTitle: { fontSize: 20, fontWeight: '700', color: theme.colors.text, textAlign: 'center' },
+  confirmSub: { fontSize: 14, color: theme.colors.textSecondary, marginTop: 4, marginBottom: 24, textAlign: 'center' },
+  confirmBtns: { width: '100%', gap: 10 },
+  cancelConfirmBtn: { paddingVertical: 14, alignItems: 'center', borderRadius: 14, backgroundColor: 'rgba(139,69,19,0.08)' },
+  cancelConfirmText: { fontSize: 15, fontWeight: '600', color: theme.colors.textSecondary },
+  deleteConfirmBtn: { paddingVertical: 14, alignItems: 'center', borderRadius: 14, backgroundColor: '#EF4444' },
+  deleteConfirmText: { fontSize: 16, fontWeight: '700', color: '#FFF' },
 });

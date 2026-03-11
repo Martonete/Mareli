@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Modal, TextInput, Alert, RefreshControl, ScrollView,
+  Modal, TextInput, RefreshControl, ScrollView,
 } from 'react-native';
 import { useProfileStore } from '../../src/store/useProfileStore';
 import { theme } from '../../src/constants/theme';
@@ -27,6 +27,7 @@ export default function TasksScreen() {
   const [isCreatingNewType, setIsCreatingNewType] = useState(false);
   const [newTypeName, setNewTypeName] = useState('');
   const [newTypePoints, setNewTypePoints] = useState('');
+  const [pendingDeleteTask, setPendingDeleteTask] = useState<TaskWithDetails | null>(null);
 
   const fetchTasks = useCallback(async () => {
     const { data, error } = await supabase
@@ -92,11 +93,11 @@ export default function TasksScreen() {
     try {
       const { error } = await supabase.from('task_types').upsert(defaultTasks, { onConflict: 'name' });
       if (error) throw error;
-      Alert.alert('¡Excelente!', 'La lista de tareas fue actualizada correctamente.');
+      alert('La lista de tareas fue actualizada correctamente.');
       setIsModalVisible(false);
       fetchTaskTypes();
     } catch (err: any) {
-      Alert.alert('Error', err.message);
+      alert(err.message);
     }
   };
 
@@ -114,7 +115,7 @@ export default function TasksScreen() {
 
     if (assignee === 'ambos') {
       if (profiles.length < 2) {
-        Alert.alert('Error', 'No hay suficientes perfiles para asignar a "Ambos"');
+        alert('No hay suficientes perfiles para asignar a "Ambos"');
         return;
       }
       const halfPoints = Math.floor((taskToComplete.task_types?.default_points ?? 0) / 2);
@@ -152,7 +153,7 @@ export default function TasksScreen() {
         .eq('id', taskToComplete.id);
         
       if (error) {
-        Alert.alert('Error', 'No se pudo completar la tarea');
+        alert('No se pudo completar la tarea');
       } else {
         const completerName = profiles.find(p => p.id === assignee)?.name || activeProfile.name;
         notifyOtherUser(activeProfile.id, '✅ Tarea completada', `${completerName.split(' ')[0]} completó "${taskToComplete.task_types?.name}" y ganó puntos!`);
@@ -171,12 +172,12 @@ export default function TasksScreen() {
 
     if (isCreatingNewType) {
       if (!newTypeName.trim() || !newTypePoints.trim()) {
-        Alert.alert('Atención', 'Completá nombre y puntaje para la nueva tarea.');
+        alert('Completá nombre y puntaje para la nueva tarea.');
         return;
       }
       const pts = parseInt(newTypePoints, 10);
       if (isNaN(pts) || pts <= 0) {
-        Alert.alert('Atención', 'El puntaje debe ser un número válido mayor a 0.');
+        alert('El puntaje debe ser un número válido mayor a 0.');
         return;
       }
       
@@ -187,7 +188,7 @@ export default function TasksScreen() {
         .single();
         
       if (typeError) {
-        Alert.alert('Error al crear el tipo de tarea', typeError.message);
+        alert(`Error al crear el tipo de tarea: ${typeError.message}`);
         return;
       }
       
@@ -196,7 +197,7 @@ export default function TasksScreen() {
       setTaskTypes(prev => [...prev, insertedType].sort((a,b) => a.name.localeCompare(b.name)));
     } else {
       if (!selectedTypeId) {
-        Alert.alert('Atención', 'Seleccioná un tipo de tarea');
+        alert('Seleccioná un tipo de tarea');
         return;
       }
       const selectedType = taskTypes.find(t => t.id === selectedTypeId);
@@ -213,7 +214,7 @@ export default function TasksScreen() {
     });
     
     if (error) {
-      Alert.alert('Error al crear', error.message);
+      alert(`Error al crear: ${error.message}`);
       return;
     }
     
@@ -261,21 +262,14 @@ export default function TasksScreen() {
   const profileColor = theme.colors.primary;
 
   const handleDeleteTask = (task: TaskWithDetails) => {
-    Alert.alert(
-      'Eliminar tarea',
-      `¿Eliminar "${task.task_types?.name}"?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            const { error } = await supabase.from('tasks').delete().eq('id', task.id);
-            if (!error) fetchTasks();
-          }
-        }
-      ]
-    );
+    setPendingDeleteTask(task);
+  };
+
+  const confirmDeleteTask = async () => {
+    if (!pendingDeleteTask) return;
+    const { error } = await supabase.from('tasks').delete().eq('id', pendingDeleteTask.id);
+    setPendingDeleteTask(null);
+    if (!error) fetchTasks();
   };
 
   const FILTERS: { key: 'all' | 'pending' | 'completed'; label: string }[] = [
@@ -461,31 +455,49 @@ export default function TasksScreen() {
           <View style={styles.confirmModal}>
             <Text style={styles.confirmTitle}>¿Quién realizó la tarea?</Text>
             <Text style={styles.confirmSub}>{taskToComplete?.task_types?.name}</Text>
-            
+
             <View style={styles.confirmBtns}>
               {profiles.map(p => (
-                <TouchableOpacity 
-                  key={p.id} 
+                <TouchableOpacity
+                  key={p.id}
                   style={styles.assignBtn}
                   onPress={() => handleConfirmComplete(p.id)}
                 >
                   <Text style={styles.assignBtnText}>{p.name}</Text>
                 </TouchableOpacity>
               ))}
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.assignBtnBoth}
                 onPress={() => handleConfirmComplete('ambos')}
               >
                 <Text style={styles.assignBtnBothText}>Ambos</Text>
               </TouchableOpacity>
             </View>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.cancelBtn}
               onPress={() => setTaskToComplete(null)}
             >
               <Text style={styles.cancelBtnText}>Cancelar</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal Confirmar Eliminar Tarea */}
+      <Modal visible={!!pendingDeleteTask} animationType="fade" transparent>
+        <View style={styles.overlayCenter}>
+          <View style={styles.confirmModal}>
+            <Text style={styles.confirmTitle}>Eliminar tarea</Text>
+            <Text style={styles.confirmSub}>¿Eliminar "{pendingDeleteTask?.task_types?.name}"?</Text>
+            <View style={styles.confirmBtns}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setPendingDeleteTask(null)}>
+                <Text style={styles.cancelBtnText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.assignBtnBoth, { backgroundColor: '#EF4444' }]} onPress={confirmDeleteTask}>
+                <Text style={styles.assignBtnBothText}>Eliminar</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

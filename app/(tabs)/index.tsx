@@ -1,7 +1,7 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, RefreshControl,
-  TouchableOpacity, Platform, StatusBar, Modal, TextInput, Alert
+  TouchableOpacity, Platform, StatusBar, Modal, TextInput
 } from 'react-native';
 import { useProfileStore } from '../../src/store/useProfileStore';
 import { theme } from '../../src/constants/theme';
@@ -14,18 +14,16 @@ import { format, parseISO, addDays, formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { notifyOtherUser } from '../../src/lib/notifications';
+import { usePoints } from '../../src/lib/usePoints';
+import { parseNoteContent } from '../../src/lib/noteUtils';
+import { debounce } from '../../src/lib/debounce';
+import { TaskWithDetails, ShoppingItem, Note, CalendarEvent } from '../../src/types/database.types';
 
+type NoteWithProfile = Note & { profiles?: { name: string } | null };
+type CalendarEventWithProfile = CalendarEvent & { profiles?: { name: string } | null };
+type RedemptionRow = { points_cost: number; profiles?: { name: string } | null; rewards?: { name: string } | null; created_at?: string };
 
-const parseNoteContent = (raw: string): { current: string; history: string[] } => {
-  try {
-    const parsed = JSON.parse(raw);
-    if (typeof parsed === 'object' && parsed?.current)
-      return { current: parsed.current, history: Array.isArray(parsed.history) ? parsed.history : [] };
-  } catch {}
-  return { current: raw, history: [] };
-};
-
-const NoteCard = ({ note, onEdit }: { note: any; onEdit: (note: any) => void }) => {
+const NoteCard = ({ note, onEdit }: { note: NoteWithProfile; onEdit: (note: NoteWithProfile) => void }) => {
   const { current, history } = parseNoteContent(note.content ?? '');
   const noteDate = note.created_at ? format(parseISO(note.created_at), 'dd/MM/yyyy') : '';
   return (
@@ -52,107 +50,104 @@ export default function DashboardScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
   const [notesY, setNotesY] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
-  const [recentTasks, setRecentTasks] = useState<any[]>([]);
-  const [pendingShopping, setPendingShopping] = useState<any[]>([]);
-  const [recentNotes, setRecentNotes] = useState<any[]>([]);
-  const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
-  const [points, setPoints] = useState<{ [name: string]: number }>({});
-  const [recentRedemptions, setRecentRedemptions] = useState<any[]>([]);
+  const [recentTasks, setRecentTasks] = useState<TaskWithDetails[]>([]);
+  const [pendingShopping, setPendingShopping] = useState<ShoppingItem[]>([]);
+  const [recentNotes, setRecentNotes] = useState<NoteWithProfile[]>([]);
+  const [upcomingEvents, setUpcomingEvents] = useState<CalendarEventWithProfile[]>([]);
+  const [recentRedemptions, setRecentRedemptions] = useState<RedemptionRow[]>([]);
   const [isNoteModalVisible, setIsNoteModalVisible] = useState(false);
   const [newNoteContent, setNewNoteContent] = useState('');
-  const [editingNote, setEditingNote] = useState<any | null>(null);
+  const [editingNote, setEditingNote] = useState<NoteWithProfile | null>(null);
   const [editContent, setEditContent] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  const fetchData = async () => {
-    const [
-      { data: tasks, error: e1 },
-      { data: items, error: e2 },
-      { data: notes, error: e3 },
-      { data: ptsData },
-      { data: eventsData, error: e5 },
-      { data: redemptionsData },
-    ] = await Promise.all([
-      supabase
-        .from('tasks')
-        .select('*, task_types(name)')
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false })
-        .limit(3),
-      supabase
-        .from('shopping_items')
-        .select('*')
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false })
-        .limit(8),
-      supabase
-        .from('notes')
-        .select('*, profiles!notes_created_by_profile_id_fkey(name)')
-        .order('created_at', { ascending: false })
-        .limit(5),
-      supabase
-        .from('tasks')
-        .select('points_awarded, profiles!tasks_completed_by_profile_id_fkey(name)')
-        .eq('status', 'completed'),
-      supabase
-        .from('calendar_events')
-        .select('*, profiles!calendar_events_created_by_profile_id_fkey(name)')
-        .gte('event_date', format(new Date(), 'yyyy-MM-dd'))
-        .lte('event_date', format(addDays(new Date(), 7), 'yyyy-MM-dd'))
-        .order('event_date', { ascending: true }),
-      supabase
-        .from('reward_redemptions')
-        .select('points_cost, profiles(name), rewards(name), created_at')
-        .order('created_at', { ascending: false }),
-    ]);
-    if (e1) console.error('tasks error:', e1.message);
-    if (e2) console.error('shopping error:', e2.message);
-    if (e3) console.error('notes error:', e3.message);
-    if (e5) console.error('events error:', e5.message);
-    if (tasks) setRecentTasks(tasks);
-    if (items) setPendingShopping(items);
-    if (notes) setRecentNotes(notes);
-    if (eventsData) setUpcomingEvents(eventsData);
-    if (ptsData) {
-      const earned: { [name: string]: number } = {};
-      ptsData.forEach((t: any) => {
-        const n = t.profiles?.name;
-        if (n) earned[n] = (earned[n] || 0) + (t.points_awarded || 0);
-      });
-      if (redemptionsData) {
-        redemptionsData.forEach((r: any) => {
-          const n = r.profiles?.name;
-          if (n) earned[n] = (earned[n] || 0) - (r.points_cost || 0);
-        });
-      }
-      setPoints(earned);
-      setRecentRedemptions(redemptionsData?.slice(0, 3) || []);
-    }
-  };
+  const { balances: points, fetchBalances } = usePoints();
+
+  const fetchTasks = useCallback(async () => {
+    const { data } = await supabase
+      .from('tasks')
+      .select('*, task_types(name, default_points), creator:profiles!tasks_created_by_profile_id_fkey(name), completer:profiles!tasks_completed_by_profile_id_fkey(name)')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+      .limit(3);
+    if (data) setRecentTasks(data as any[]);
+  }, []);
+
+  const fetchShopping = useCallback(async () => {
+    const { data } = await supabase
+      .from('shopping_items')
+      .select('*')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+      .limit(8);
+    if (data) setPendingShopping(data as ShoppingItem[]);
+  }, []);
+
+  const fetchNotes = useCallback(async () => {
+    const { data } = await supabase
+      .from('notes')
+      .select('*, profiles!notes_created_by_profile_id_fkey(name)')
+      .order('created_at', { ascending: false })
+      .limit(5);
+    if (data) setRecentNotes(data as any[]);
+  }, []);
+
+  const fetchEvents = useCallback(async () => {
+    const { data } = await supabase
+      .from('calendar_events')
+      .select('*, profiles!calendar_events_created_by_profile_id_fkey(name)')
+      .gte('event_date', format(new Date(), 'yyyy-MM-dd'))
+      .lte('event_date', format(addDays(new Date(), 7), 'yyyy-MM-dd'))
+      .order('event_date', { ascending: true });
+    if (data) setUpcomingEvents(data as any[]);
+  }, []);
+
+  const fetchRedemptions = useCallback(async () => {
+    const { data } = await supabase
+      .from('reward_redemptions')
+      .select('points_cost, profiles(name), rewards(name), created_at')
+      .order('created_at', { ascending: false })
+      .limit(5);
+    if (data) setRecentRedemptions(data as any[]);
+  }, []);
+
+  const fetchAll = useCallback(async () => {
+    await Promise.all([fetchTasks(), fetchShopping(), fetchNotes(), fetchEvents(), fetchRedemptions(), fetchBalances()]);
+  }, [fetchTasks, fetchShopping, fetchNotes, fetchEvents, fetchRedemptions, fetchBalances]);
+
+  // Debounced: cada listener solo refresca lo que cambió
+  const debouncedFetchTasks = useMemo(() => debounce(() => { fetchTasks(); fetchBalances(); }, 300), [fetchTasks, fetchBalances]);
+  const debouncedFetchShopping = useMemo(() => debounce(fetchShopping, 300), [fetchShopping]);
+  const debouncedFetchNotes = useMemo(() => debounce(fetchNotes, 300), [fetchNotes]);
+  const debouncedFetchRedemptions = useMemo(() => debounce(() => { fetchRedemptions(); fetchBalances(); }, 300), [fetchRedemptions, fetchBalances]);
 
   const handleSaveNote = async () => {
-    if (!newNoteContent.trim() || !activeProfile) return;
+    if (!newNoteContent.trim() || !activeProfile || saving) return;
+    setSaving(true);
     const { error } = await supabase.from('notes').insert({
       content: newNoteContent.trim(),
       created_by_profile_id: activeProfile.id,
     });
+    setSaving(false);
     if (!error) {
       setIsNoteModalVisible(false);
       setNewNoteContent('');
-      fetchData();
+      fetchNotes();
       notifyOtherUser(activeProfile.id, '📝 Nueva nota', `${activeProfile.name.split(' ')[0]} dejó una nueva nota rápida en el corcho.`);
     } else {
-      Alert.alert('Error', 'No se pudo guardar la nota');
+      alert('No se pudo guardar la nota');
     }
   };
 
-  const handleOpenEdit = (note: any) => {
+  const handleOpenEdit = (note: NoteWithProfile) => {
     const { current } = parseNoteContent(note.content ?? '');
     setEditContent(current);
     setEditingNote(note);
   };
 
   const handleSaveEdit = async () => {
-    if (!editContent.trim() || !editingNote) return;
+    if (!editContent.trim() || !editingNote || saving) return;
+    setSaving(true);
     const { current, history } = parseNoteContent(editingNote.content ?? '');
     const changed = current.trim() !== editContent.trim();
     const newHistory = changed ? [current, ...history].slice(0, 5) : history;
@@ -160,33 +155,32 @@ export default function DashboardScreen() {
       ? JSON.stringify({ current: editContent.trim(), history: newHistory })
       : editContent.trim();
     const { error } = await supabase.from('notes').update({ content: newContent }).eq('id', editingNote.id);
+    setSaving(false);
     if (!error) {
       setEditingNote(null);
       setEditContent('');
-      fetchData();
+      fetchNotes();
       if (activeProfile && changed) {
         notifyOtherUser(activeProfile.id, '✏️ Nota editada', `${activeProfile.name.split(' ')[0]} actualizó una nota.`);
       }
     } else {
-      Alert.alert('Error', 'No se pudo guardar la edición');
+      alert('No se pudo guardar la edición');
     }
   };
 
-  const onRefresh = async () => { setRefreshing(true); await fetchData(); setRefreshing(false); };
-  
+  const onRefresh = async () => { setRefreshing(true); await fetchAll(); setRefreshing(false); };
+
   useFocusEffect(
     useCallback(() => {
-      fetchData();
-
+      fetchAll();
       const channel = supabase.channel('dashboard_changes')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchData())
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items' }, () => fetchData())
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'notes' }, () => fetchData())
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'reward_redemptions' }, () => fetchData())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, debouncedFetchTasks)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items' }, debouncedFetchShopping)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'notes' }, debouncedFetchNotes)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'reward_redemptions' }, debouncedFetchRedemptions)
         .subscribe();
-
       return () => { supabase.removeChannel(channel); };
-    }, [])
+    }, [fetchAll, debouncedFetchTasks, debouncedFetchShopping, debouncedFetchNotes, debouncedFetchRedemptions])
   );
 
   const topPadding = insets.top > 0 ? insets.top + 8 : (Platform.OS === 'android' ? (StatusBar.currentHeight ?? 24) + 8 : 20);
@@ -195,13 +189,13 @@ export default function DashboardScreen() {
   const todayLabel = format(new Date(), "EEEE d 'de' MMMM", { locale: es }).replace(/^\w/, c => c.toUpperCase());
 
   const getTs = (s?: string | null) => s ? new Date(s).getTime() : 0;
-  const dynamicSections = [
+  const dynamicSections = useMemo(() => [
     { key: 'notes', ts: getTs(recentNotes[0]?.created_at) },
     { key: 'tasks', ts: getTs(recentTasks[0]?.created_at) },
     { key: 'shopping', ts: getTs(pendingShopping[0]?.created_at) },
-    { key: 'events', ts: upcomingEvents.length > 0 ? Math.max(...upcomingEvents.map((e: any) => getTs(e.created_at))) : 0 },
+    { key: 'events', ts: upcomingEvents.length > 0 ? Math.max(...upcomingEvents.map(e => getTs(e.created_at))) : 0 },
     { key: 'redemptions', ts: getTs(recentRedemptions[0]?.created_at) },
-  ].sort((a, b) => b.ts - a.ts);
+  ].sort((a, b) => b.ts - a.ts), [recentNotes, recentTasks, pendingShopping, upcomingEvents, recentRedemptions]);
 
   return (
     <ScrollView
@@ -211,7 +205,6 @@ export default function DashboardScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
       showsVerticalScrollIndicator={false}
     >
-      {/* Header */}
       <View style={styles.header}>
         <View>
           <Text style={styles.greeting}>{greeting}</Text>
@@ -222,39 +215,28 @@ export default function DashboardScreen() {
         </View>
       </View>
 
-      {/* Grid de resumen */}
       <View style={styles.grid}>
         <TouchableOpacity style={styles.gridCard} onPress={() => router.push('/(tabs)/tasks')} activeOpacity={0.75}>
-          <View style={[styles.gridIconBg, { backgroundColor: 'rgba(139, 69, 19, 0.12)' }]}>
-            <Bell size={20} color={theme.colors.primary} />
-          </View>
+          <View style={[styles.gridIconBg, { backgroundColor: 'rgba(139, 69, 19, 0.12)' }]}><Bell size={20} color={theme.colors.primary} /></View>
           <Text style={styles.gridNum}>{recentTasks.length}</Text>
           <Text style={styles.gridLabel}>Tareas{'\n'}pendientes</Text>
         </TouchableOpacity>
-
         <TouchableOpacity style={styles.gridCard} onPress={() => router.push('/(tabs)/shopping')} activeOpacity={0.75}>
-          <View style={[styles.gridIconBg, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}>
-            <ShoppingCart size={20} color="#10B981" />
-          </View>
+          <View style={[styles.gridIconBg, { backgroundColor: 'rgba(16, 185, 129, 0.12)' }]}><ShoppingCart size={20} color="#10B981" /></View>
           <Text style={[styles.gridNum, { color: '#10B981' }]}>{pendingShopping.length}</Text>
           <Text style={styles.gridLabel}>Artículos{'\n'}de compra</Text>
         </TouchableOpacity>
-
         <TouchableOpacity style={styles.gridCard} onPress={() => scrollViewRef.current?.scrollTo({ y: notesY - 16, animated: true })} activeOpacity={0.75}>
-          <View style={[styles.gridIconBg, { backgroundColor: 'rgba(245, 158, 11, 0.12)' }]}>
-            <FileText size={20} color="#F59E0B" />
-          </View>
+          <View style={[styles.gridIconBg, { backgroundColor: 'rgba(245, 158, 11, 0.12)' }]}><FileText size={20} color="#F59E0B" /></View>
           <Text style={[styles.gridNum, { color: '#F59E0B' }]}>{recentNotes.length}</Text>
           <Text style={styles.gridLabel}>Notas{'\n'}recientes</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Resumen Puntos */}
       <View style={styles.pointsSummary}>
         <Text style={styles.pointsTitle}>Saldo de Puntos</Text>
         {Object.entries(points).map(([name, pts], i) => {
-          const profileColors = ['#F472B6', '#60A5FA'];
-          const color = profileColors[i % profileColors.length];
+          const color = ['#F472B6', '#60A5FA'][i % 2];
           const maxPts = Math.max(...Object.values(points), 1);
           const pct = Math.min(Math.max(pts / maxPts, 0), 1);
           return (
@@ -269,82 +251,54 @@ export default function DashboardScreen() {
         })}
       </View>
 
-      {/* Secciones dinámicas - ordenadas por actividad más reciente */}
       {dynamicSections.map(({ key }) => {
         if (key === 'notes') return (
           <View key="notes" style={styles.section} onLayout={(e) => setNotesY(e.nativeEvent.layout.y)}>
-            <View style={[styles.sectionHeader, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+            <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionTitle}>Notas Recientes</Text>
-              <TouchableOpacity onPress={() => setIsNoteModalVisible(true)} style={{ padding: 4, marginRight: -4 }}>
-                <Plus size={20} color={theme.colors.primary} />
-              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setIsNoteModalVisible(true)} style={styles.sectionAddBtn}><Plus size={20} color={theme.colors.primary} /></TouchableOpacity>
             </View>
             {recentNotes.length === 0 ? (
-              <View style={styles.emptyRow}>
-                <Sparkles size={16} color="rgba(139,69,19,0.4)" />
-                <Text style={styles.emptyRowText}>No hay notas aún</Text>
-              </View>
-            ) : (
-              recentNotes.map((note, i) => (
-                <NoteCard key={note.id ?? i} note={note} onEdit={handleOpenEdit} />
-              ))
-            )}
+              <View style={styles.emptyRow}><Sparkles size={16} color="rgba(139,69,19,0.4)" /><Text style={styles.emptyRowText}>No hay notas aún</Text></View>
+            ) : recentNotes.map((note) => <NoteCard key={note.id} note={note} onEdit={handleOpenEdit} />)}
           </View>
         );
         if (key === 'tasks') return (
           <View key="tasks" style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Tareas Pendientes</Text>
-            </View>
+            <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Tareas Pendientes</Text></View>
             {recentTasks.length === 0 ? (
-              <View style={styles.emptyRow}>
-                <Sparkles size={16} color="rgba(139,69,19,0.4)" />
-                <Text style={styles.emptyRowText}>Sin tareas pendientes 🎉</Text>
+              <View style={styles.emptyRow}><Sparkles size={16} color="rgba(139,69,19,0.4)" /><Text style={styles.emptyRowText}>Sin tareas pendientes 🎉</Text></View>
+            ) : recentTasks.map((task) => (
+              <View key={task.id} style={styles.listItem}>
+                <View style={styles.listDot} />
+                <Text style={styles.listItemText} numberOfLines={2}>{task.task_types?.name ?? 'Tarea'}</Text>
+                <ChevronRight size={16} color="rgba(139,69,19,0.3)" />
               </View>
-            ) : (
-              recentTasks.map((task, i) => (
-                <View key={task.id ?? i} style={styles.listItem}>
-                  <View style={styles.listDot} />
-                  <Text style={styles.listItemText} numberOfLines={2}>{task.task_types?.name ?? 'Tarea'}</Text>
-                  <ChevronRight size={16} color="rgba(139,69,19,0.3)" />
-                </View>
-              ))
-            )}
+            ))}
           </View>
         );
         if (key === 'shopping') return (
           <View key="shopping" style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Lista de Compras</Text>
-            </View>
+            <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Lista de Compras</Text></View>
             {pendingShopping.length === 0 ? (
-              <View style={styles.emptyRow}>
-                <Sparkles size={16} color="rgba(139,69,19,0.4)" />
-                <Text style={styles.emptyRowText}>La alacena está completa 🛒</Text>
+              <View style={styles.emptyRow}><Sparkles size={16} color="rgba(139,69,19,0.4)" /><Text style={styles.emptyRowText}>La alacena está completa 🛒</Text></View>
+            ) : pendingShopping.slice(0, 4).map((item) => (
+              <View key={item.id} style={styles.listItem}>
+                <View style={styles.listDot} />
+                <Text style={styles.listItemText} numberOfLines={1}>{item.name}</Text>
+                <ChevronRight size={16} color="rgba(139,69,19,0.3)" />
               </View>
-            ) : (
-              pendingShopping.slice(0, 4).map((item, i) => (
-                <View key={item.id ?? i} style={styles.listItem}>
-                  <View style={styles.listDot} />
-                  <Text style={styles.listItemText} numberOfLines={1}>{item.name}</Text>
-                  <ChevronRight size={16} color="rgba(139,69,19,0.3)" />
-                </View>
-              ))
-            )}
-            {pendingShopping.length > 4 && (
-              <Text style={styles.moreText}>+{pendingShopping.length - 4} más en la lista</Text>
-            )}
+            ))}
+            {pendingShopping.length > 4 && <Text style={styles.moreText}>+{pendingShopping.length - 4} más en la lista</Text>}
           </View>
         );
         if (key === 'events' && upcomingEvents.length > 0) return (
           <View key="events" style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Próximos Eventos</Text>
-            </View>
-            {upcomingEvents.map((event, i) => (
-              <View key={event.id ?? i} style={styles.listItem}>
+            <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Próximos Eventos</Text></View>
+            {upcomingEvents.map((event) => (
+              <View key={event.id} style={styles.listItem}>
                 <View style={styles.listDot} />
-                <View style={{ flex: 1 }}>
+                <View style={styles.listItemFlex}>
                   <Text style={styles.listItemText} numberOfLines={1}>{event.title}</Text>
                   <Text style={styles.eventMeta}>
                     {format(parseISO(event.event_date + 'T00:00:00'), "EEEE d 'de' MMMM", { locale: es }).replace(/^\w/, c => c.toUpperCase())}
@@ -358,25 +312,19 @@ export default function DashboardScreen() {
         );
         if (key === 'redemptions' && recentRedemptions.length > 0) return (
           <View key="redemptions" style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Canjes recientes</Text>
-            </View>
+            <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Canjes recientes</Text></View>
             {recentRedemptions.map((red, i) => {
-              const timeAgo = red.created_at
-                ? formatDistanceToNow(parseISO(red.created_at), { addSuffix: true, locale: es })
-                : '';
+              const timeAgo = red.created_at ? formatDistanceToNow(parseISO(red.created_at), { addSuffix: true, locale: es }) : '';
               return (
                 <View key={i} style={styles.listItem}>
                   <View style={styles.listDot} />
-                  <View style={{ flex: 1 }}>
+                  <View style={styles.listItemFlex}>
                     <Text style={styles.listItemText} numberOfLines={1}>
-                      <Text style={{ fontWeight: '700' }}>{red.profiles?.name}</Text>
-                      {' canjeó '}
-                      <Text style={styles.redemptionReward}>🎁 {red.rewards?.name ?? '?'}</Text>
+                      <Text style={styles.boldText}>{red.profiles?.name}</Text>{' canjeó '}<Text style={styles.redemptionReward}>🎁 {red.rewards?.name ?? '?'}</Text>
                     </Text>
-                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 2 }}>
-                      <Text style={{ fontSize: 11, color: theme.colors.primary, fontWeight: '700' }}>-{red.points_cost} pts</Text>
-                      {timeAgo !== '' && <Text style={{ fontSize: 11, color: theme.colors.textSecondary }}>{timeAgo}</Text>}
+                    <View style={styles.redemptionMeta}>
+                      <Text style={styles.redemptionPts}>-{red.points_cost} pts</Text>
+                      {timeAgo !== '' && <Text style={styles.redemptionTime}>{timeAgo}</Text>}
                     </View>
                   </View>
                 </View>
@@ -387,235 +335,79 @@ export default function DashboardScreen() {
         return null;
       })}
 
-      {/* Modal: crear o editar nota */}
       <Modal visible={isNoteModalVisible || editingNote !== null} animationType="slide" transparent>
         <View style={styles.overlay}>
           <View style={styles.modal}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{editingNote ? 'Editar Nota' : 'Nueva Nota'}</Text>
-              <TouchableOpacity
-                onPress={() => { setIsNoteModalVisible(false); setEditingNote(null); setEditContent(''); }}
-                style={styles.closeBtn}
-              >
+              <TouchableOpacity onPress={() => { setIsNoteModalVisible(false); setEditingNote(null); setEditContent(''); }} style={styles.closeBtn}>
                 <X size={20} color={theme.colors.primary} />
               </TouchableOpacity>
             </View>
-
             <TextInput
               style={[styles.input, styles.textArea]}
               placeholder="Escribí una nota para la casa..."
               placeholderTextColor="rgba(139,69,19,0.35)"
               value={editingNote ? editContent : newNoteContent}
               onChangeText={editingNote ? setEditContent : setNewNoteContent}
-              multiline
-              autoFocus
+              multiline autoFocus
             />
-
             <TouchableOpacity
-              style={[styles.saveBtn, !(editingNote ? editContent : newNoteContent).trim() && styles.saveBtnDisabled]}
+              style={[styles.saveBtn, (saving || !(editingNote ? editContent : newNoteContent).trim()) && styles.saveBtnDisabled]}
               onPress={editingNote ? handleSaveEdit : handleSaveNote}
-              disabled={!(editingNote ? editContent : newNoteContent).trim()}
+              disabled={saving || !(editingNote ? editContent : newNoteContent).trim()}
             >
-              <Text style={styles.saveBtnText}>{editingNote ? 'Guardar Cambios' : 'Guardar Nota'}</Text>
+              <Text style={styles.saveBtnText}>{saving ? 'Guardando...' : editingNote ? 'Guardar Cambios' : 'Guardar Nota'}</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
-
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-  },
-  content: {
-    paddingHorizontal: 20,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  greeting: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: theme.colors.text,
-    letterSpacing: -0.5,
-  },
-  headerSub: {
-    fontSize: 14,
-    color: theme.colors.textSecondary,
-    marginTop: 2,
-    fontWeight: '500',
-  },
-  headerIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(139, 69, 19, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  grid: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 24,
-  },
-  gridCard: {
-    flex: 1,
-    backgroundColor: '#FFF',
-    borderRadius: 18,
-    paddingVertical: 18,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(139, 69, 19, 0.1)',
-    shadowColor: '#8B4513',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  gridIconBg: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  gridNum: {
-    fontSize: 36,
-    fontWeight: '800',
-    color: theme.colors.primary,
-    letterSpacing: -1,
-    lineHeight: 40,
-    textAlign: 'center',
-  },
-  gridLabel: {
-    fontSize: 11,
-    color: theme.colors.textSecondary,
-    fontWeight: '500',
-    marginTop: 4,
-    lineHeight: 15,
-    textAlign: 'center',
-  },
-  section: {
-    marginBottom: 20,
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(139, 69, 19, 0.08)',
-    overflow: 'hidden',
-    shadowColor: '#8B4513',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 1,
-  },
-  sectionHeader: {
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(139, 69, 19, 0.07)',
-  },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: theme.colors.text,
-    letterSpacing: -0.2,
-  },
-  listItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(139, 69, 19, 0.06)',
-    gap: 12,
-  },
-  listDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: theme.colors.primary,
-    flexShrink: 0,
-  },
+  container: { flex: 1, backgroundColor: theme.colors.background },
+  content: { paddingHorizontal: 20 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+  greeting: { fontSize: 26, fontWeight: '700', color: theme.colors.text, letterSpacing: -0.5 },
+  headerSub: { fontSize: 14, color: theme.colors.textSecondary, marginTop: 2, fontWeight: '500' },
+  headerIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  grid: { flexDirection: 'row', gap: 12, marginBottom: 24 },
+  gridCard: { flex: 1, backgroundColor: '#FFF', borderRadius: 18, paddingVertical: 18, paddingHorizontal: 8, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(139, 69, 19, 0.1)', shadowColor: '#8B4513', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.08, shadowRadius: 10, elevation: 3 },
+  gridIconBg: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+  gridNum: { fontSize: 36, fontWeight: '800', color: theme.colors.primary, letterSpacing: -1, lineHeight: 40, textAlign: 'center' },
+  gridLabel: { fontSize: 11, color: theme.colors.textSecondary, fontWeight: '500', marginTop: 4, lineHeight: 15, textAlign: 'center' },
+  section: { marginBottom: 20, backgroundColor: '#FFF', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(139, 69, 19, 0.08)', overflow: 'hidden', shadowColor: '#8B4513', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 1 },
+  sectionHeader: { paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(139, 69, 19, 0.07)' },
+  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(139, 69, 19, 0.07)' },
+  sectionAddBtn: { padding: 4, marginRight: -4 },
+  sectionTitle: { fontSize: 15, fontWeight: '700', color: theme.colors.text, letterSpacing: -0.2 },
+  listItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(139, 69, 19, 0.06)', gap: 12 },
+  listItemFlex: { flex: 1 },
+  listDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: theme.colors.primary, flexShrink: 0 },
   listItemText: { fontSize: 15, color: theme.colors.text, fontWeight: '500' },
-  eventMeta: {
-    fontSize: 12,
-    color: theme.colors.textSecondary,
-    marginTop: 2,
-    fontWeight: '500',
-  },
-  moreText: {
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    fontSize: 12,
-    color: theme.colors.primary,
-    fontWeight: '600',
-    lineHeight: 20,
-  },
-  emptyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  emptyRowText: {
-    fontSize: 14,
-    color: theme.colors.textSecondary,
-    fontStyle: 'italic',
-  },
-  noteCard: {
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    backgroundColor: '#FFF',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(139, 69, 19, 0.06)',
-  },
-  noteHistory: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(139, 69, 19, 0.1)',
-    gap: 3,
-  },
-  noteHistoryText: {
-    fontSize: 11,
-    color: theme.colors.textSecondary,
-    fontStyle: 'italic',
-    lineHeight: 16,
-    opacity: 0.75,
-  },
-  noteText: {
-    fontSize: 14,
-    color: theme.colors.text,
-    lineHeight: 20,
-    fontWeight: '400',
-  },
-  noteAuthor: {
-    fontSize: 12,
-    color: theme.colors.textSecondary,
-    marginTop: 4,
-    fontWeight: '500',
-  },
-  pointsSummary: {
-    marginBottom: 24, paddingVertical: 20, paddingHorizontal: 16, backgroundColor: '#FFF', borderRadius: 18,
-    borderWidth: 1, borderColor: 'rgba(139, 69, 19, 0.08)',
-    shadowColor: '#8B4513', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.07, shadowRadius: 10, elevation: 2,
-  },
+  boldText: { fontWeight: '700' },
+  eventMeta: { fontSize: 12, color: theme.colors.textSecondary, marginTop: 2, fontWeight: '500' },
+  moreText: { paddingHorizontal: 16, paddingBottom: 12, fontSize: 12, color: theme.colors.primary, fontWeight: '600', lineHeight: 20 },
+  emptyRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 14 },
+  emptyRowText: { fontSize: 14, color: theme.colors.textSecondary, fontStyle: 'italic' },
+  noteCard: { paddingHorizontal: 16, paddingVertical: 13, backgroundColor: '#FFF', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(139, 69, 19, 0.06)' },
+  noteHistory: { marginTop: 8, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(139, 69, 19, 0.1)', gap: 3 },
+  noteHistoryText: { fontSize: 11, color: theme.colors.textSecondary, fontStyle: 'italic', lineHeight: 16, opacity: 0.75 },
+  noteText: { fontSize: 14, color: theme.colors.text, lineHeight: 20, fontWeight: '400' },
+  noteAuthor: { fontSize: 12, color: theme.colors.textSecondary, marginTop: 4, fontWeight: '500' },
+  pointsSummary: { marginBottom: 24, paddingVertical: 20, paddingHorizontal: 16, backgroundColor: '#FFF', borderRadius: 18, borderWidth: 1, borderColor: 'rgba(139, 69, 19, 0.08)', shadowColor: '#8B4513', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.07, shadowRadius: 10, elevation: 2 },
   pointsTitle: { fontSize: 15, fontWeight: '700', color: theme.colors.text, marginBottom: 12, alignSelf: 'flex-start' },
   pointsRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
   pointsRowName: { fontSize: 13, fontWeight: '600', color: theme.colors.text, width: 50 },
   pointsBarTrack: { flex: 1, height: 8, backgroundColor: 'rgba(139,69,19,0.1)', borderRadius: 4, overflow: 'hidden' },
   pointsBarFill: { height: 8, borderRadius: 4 },
   pointsRowNum: { fontSize: 14, fontWeight: '800', width: 36, textAlign: 'right' },
+  redemptionReward: { fontStyle: 'italic', fontWeight: '600', color: '#7C3AED' },
+  redemptionMeta: { flexDirection: 'row', gap: 8, marginTop: 2 },
+  redemptionPts: { fontSize: 11, color: theme.colors.primary, fontWeight: '700' },
+  redemptionTime: { fontSize: 11, color: theme.colors.textSecondary },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
   modal: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '80%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
@@ -626,5 +418,4 @@ const styles = StyleSheet.create({
   saveBtn: { backgroundColor: theme.colors.primary, borderRadius: 14, paddingVertical: 16, alignItems: 'center', shadowColor: theme.colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
   saveBtnDisabled: { opacity: 0.5 },
   saveBtnText: { fontSize: 16, fontWeight: '700', color: '#FFF' },
-  redemptionReward: { fontStyle: 'italic', fontWeight: '600', color: '#7C3AED' },
 });

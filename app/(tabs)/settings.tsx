@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal } from 'react-native';
 import { useProfileStore } from '../../src/store/useProfileStore';
 import { theme } from '../../src/constants/theme';
 import { LogOut, User, ChevronRight, Bell, Shield, Info } from 'lucide-react-native';
@@ -11,22 +11,16 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
   const handleLogout = () => {
-    Alert.alert(
-      'Cambiar perfil',
-      '¿Querés cambiar de perfil?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Salir',
-          style: 'destructive',
-          onPress: async () => {
-            await clearProfile();
-            router.replace('/profile-select');
-          }
-        }
-      ]
-    );
+    setShowLogoutConfirm(true);
+  };
+
+  const confirmLogout = async () => {
+    setShowLogoutConfirm(false);
+    await clearProfile();
+    router.replace('/profile-select');
   };
 
   const profileColor = theme.colors.primary;
@@ -36,11 +30,7 @@ export default function SettingsScreen() {
     { icon: Shield, label: 'Privacidad', sub: 'Solo Liz y Martín tienen acceso', onPress: () => {} },
     {
       icon: Info, label: 'Acerca de', sub: 'Versión 1.0.0', onPress: () => {
-        Alert.alert(
-          '🏠 Casa en Orden',
-          'Versión 1.0.0\n\nHecha con amor para Liz y Martín 💑\n\nGestioná tareas, puntos, compras, eventos y los cuidados de Tony desde un solo lugar.',
-          [{ text: 'Cerrar', style: 'cancel' }]
-        );
+        alert('Casa en Orden v1.0.0\n\nHecha con amor para Liz y Martín.\n\nGestioná tareas, puntos, compras, eventos y los cuidados de Tony desde un solo lugar.');
       }
     },
   ];
@@ -92,6 +82,24 @@ export default function SettingsScreen() {
         <LogOut size={18} color={theme.colors.error} />
         <Text style={styles.logoutText}>Cambiar perfil</Text>
       </TouchableOpacity>
+
+      {/* Modal confirmar cambio de perfil */}
+      <Modal visible={showLogoutConfirm} animationType="fade" transparent>
+        <View style={styles.overlayCenter}>
+          <View style={styles.confirmModal}>
+            <Text style={styles.confirmTitle}>Cambiar perfil</Text>
+            <Text style={styles.confirmSub}>¿Querés cambiar de perfil?</Text>
+            <View style={styles.confirmBtns}>
+              <TouchableOpacity style={styles.cancelConfirmBtn} onPress={() => setShowLogoutConfirm(false)}>
+                <Text style={styles.cancelConfirmText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.deleteConfirmBtn} onPress={confirmLogout}>
+                <Text style={styles.deleteConfirmText}>Salir</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -140,4 +148,13 @@ const styles = StyleSheet.create({
     borderRadius: 14, paddingVertical: 14,
   },
   logoutText: { fontSize: 15, fontWeight: '700', color: theme.colors.error },
+  overlayCenter: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  confirmModal: { backgroundColor: '#FFF', borderRadius: 24, padding: 24, width: '100%', maxWidth: 340, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 10 },
+  confirmTitle: { fontSize: 20, fontWeight: '700', color: theme.colors.text, textAlign: 'center' },
+  confirmSub: { fontSize: 14, color: theme.colors.textSecondary, marginTop: 4, marginBottom: 24, textAlign: 'center' },
+  confirmBtns: { width: '100%', gap: 10 },
+  cancelConfirmBtn: { paddingVertical: 14, alignItems: 'center', borderRadius: 14, backgroundColor: 'rgba(139,69,19,0.08)' },
+  cancelConfirmText: { fontSize: 15, fontWeight: '600', color: theme.colors.textSecondary },
+  deleteConfirmBtn: { paddingVertical: 14, alignItems: 'center', borderRadius: 14, backgroundColor: '#EF4444' },
+  deleteConfirmText: { fontSize: 16, fontWeight: '700', color: '#FFF' },
 });

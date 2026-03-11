@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, Alert, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, Modal } from 'react-native';
 import { theme } from '../../src/constants/theme';
 import { supabase } from '../../src/lib/supabase';
 import Svg, { Circle } from 'react-native-svg';
@@ -10,22 +10,23 @@ import { formatDistanceToNow, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useProfileStore } from '../../src/store/useProfileStore';
+import { usePoints } from '../../src/lib/usePoints';
+import { DEFAULT_REWARDS } from '../../src/constants/rewards';
 
 export default function PointsScreen() {
   const insets = useSafeAreaInsets();
   const { activeProfile } = useProfileStore();
   const [refreshing, setRefreshing] = useState(false);
-  const [balances, setBalances] = useState<{ [name: string]: number }>({});
-  const [allProfiles, setAllProfiles] = useState<{id: string, name: string}[]>([]);
+  const [allProfiles, setAllProfiles] = useState<{ id: string, name: string }[]>([]);
   const [rewards, setRewards] = useState<any[]>([]);
   const [redemptions, setRedemptions] = useState<any[]>([]);
   const [pendingRedeem, setPendingRedeem] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+
+  const { balances, fetchBalances } = usePoints();
 
   const fetchData = useCallback(async () => {
-    const { data: tasks } = await supabase
-      .from('tasks')
-      .select('points_awarded, profiles!tasks_completed_by_profile_id_fkey(name)')
-      .eq('status', 'completed');
+    await fetchBalances();
 
     const { data: spends } = await supabase
       .from('reward_redemptions')
@@ -37,26 +38,7 @@ export default function PointsScreen() {
       .select('*')
       .order('points_cost', { ascending: true });
 
-    const earned: { [name: string]: number } = {};
-    const spent: { [name: string]: number } = {};
-    if (tasks) {
-      tasks.forEach((t: any) => {
-        const n = t.profiles?.name;
-        if (n) earned[n] = (earned[n] || 0) + (t.points_awarded || 0);
-      });
-    }
-    if (spends) {
-      spends.forEach((s: any) => {
-        const n = s.profiles?.name;
-        if (n) spent[n] = (spent[n] || 0) + (s.points_cost || 0);
-      });
-      setRedemptions(spends.slice(0, 5));
-    }
-    const newBalances: { [name: string]: number } = {};
-    [...new Set([...Object.keys(earned), ...Object.keys(spent)])].forEach(name => {
-      newBalances[name] = (earned[name] || 0) - (spent[name] || 0);
-    });
-    setBalances(newBalances);
+    if (spends) setRedemptions(spends.slice(0, 5));
 
     const { data: profilesData } = await supabase.from('profiles').select('id, name');
     if (profilesData) setAllProfiles(profilesData);
@@ -64,21 +46,9 @@ export default function PointsScreen() {
     if (items && items.length > 0) {
       setRewards(items);
     } else {
-      setRewards([
-        { id: 'mock-1', name: 'Elegir la película/serie', points_cost: 20 },
-        { id: 'mock-2', name: 'Merienda', points_cost: 25 },
-        { id: 'mock-3', name: 'Desayuno en la cama', points_cost: 35 },
-        { id: 'mock-4', name: 'Postre sorpresa', points_cost: 35 },
-        { id: 'mock-5', name: 'Elegís la música todo el día', points_cost: 30 },
-        { id: 'mock-6', name: 'Paseo sorpresa', points_cost: 50 },
-        { id: 'mock-7', name: 'Noche de cine', points_cost: 60 },
-        { id: 'mock-8', name: 'Noche de bar / tragos', points_cost: 80 },
-        { id: 'mock-9', name: 'Masajes', points_cost: 90 },
-        { id: 'mock-10', name: 'Oral', points_cost: 110 },
-        { id: 'mock-11', name: 'Soy tu esclavo/a', points_cost: 160 },
-      ]);
+      setRewards(DEFAULT_REWARDS.map((r, i) => ({ id: `mock-${i + 1}`, ...r })));
     }
-  }, []);
+  }, [fetchBalances]);
 
   const onRefresh = async () => { setRefreshing(true); await fetchData(); setRefreshing(false); };
 
@@ -94,31 +64,18 @@ export default function PointsScreen() {
   );
 
   const syncRewards = async () => {
-    const defaultRewards = [
-      { name: 'Elegir la película/serie', points_cost: 20 },
-      { name: 'Merienda', points_cost: 25 },
-      { name: 'Desayuno en la cama', points_cost: 35 },
-      { name: 'Postre sorpresa', points_cost: 35 },
-      { name: 'Elegís la música todo el día', points_cost: 30 },
-      { name: 'Paseo sorpresa', points_cost: 50 },
-      { name: 'Noche de cine', points_cost: 60 },
-      { name: 'Noche de bar / tragos', points_cost: 80 },
-      { name: 'Masajes', points_cost: 90 },
-      { name: 'Oral', points_cost: 110 },
-      { name: 'Soy tu esclavo/a', points_cost: 160 },
-    ];
     try {
       const { data: existing } = await supabase.from('rewards').select('name');
       const existingNames = existing?.map((e: any) => e.name) || [];
-      const toInsert = defaultRewards.filter(r => !existingNames.includes(r.name));
+      const toInsert = DEFAULT_REWARDS.filter(r => !existingNames.includes(r.name));
       if (toInsert.length > 0) {
-        const { error } = await supabase.from('rewards').insert(toInsert);
+        const { error } = await supabase.from('rewards').insert(toInsert as any[]);
         if (error) throw error;
       }
-      Alert.alert('¡Tienda actualizada!', 'Los premios se agregaron correctamente.');
+      alert('Los premios se agregaron correctamente.');
       fetchData();
     } catch (err: any) {
-      Alert.alert('Error', err.message);
+      alert(err.message);
     }
   };
 
@@ -127,7 +84,7 @@ export default function PointsScreen() {
     const myBal = balances[activeProfile.name] ?? 0;
 
     if (myBal < reward.points_cost) {
-      Alert.alert('Puntos insuficientes', 'Necesitás seguir completando tareas para alcanzar este premio.');
+      alert('Puntos insuficientes: necesitás seguir completando tareas para alcanzar este premio.');
       return;
     }
 
@@ -143,7 +100,7 @@ export default function PointsScreen() {
           .select()
           .single();
         if (insertErr || !inserted) {
-          Alert.alert('Error', 'No se pudo procesar el canje.');
+          alert('No se pudo procesar el canje.');
           return;
         }
         rewardId = inserted.id;
@@ -154,18 +111,20 @@ export default function PointsScreen() {
   };
 
   const confirmRedeem = async () => {
-    if (!activeProfile || !pendingRedeem) return;
+    if (!activeProfile || !pendingRedeem || saving) return;
+    setSaving(true);
     const { error } = await supabase.from('reward_redemptions').insert({
       profile_id: activeProfile.id,
       reward_id: pendingRedeem.resolvedId,
       points_cost: pendingRedeem.points_cost,
     });
+    setSaving(false);
     setPendingRedeem(null);
     if (error) {
-      Alert.alert('Error', 'No se pudo procesar el canje: ' + error.message);
+      alert('No se pudo procesar el canje: ' + error.message);
     } else {
       const partnerName = allProfiles.find(p => p.id !== activeProfile.id)?.name?.split(' ')[0] ?? 'tu pareja';
-      Alert.alert('¡Canje exitoso! 🎊', `Coordiná con ${partnerName} para hacer realidad tu premio 😉`);
+      alert(`¡Canje exitoso! Coordiná con ${partnerName} para hacer realidad tu premio.`);
       notifyOtherUser(activeProfile.id, '🎁 Premio canjeado', `${activeProfile.name.split(' ')[0]} canjeó "${pendingRedeem.name}" por ${pendingRedeem.points_cost} pts.`);
       fetchData();
     }
@@ -181,7 +140,6 @@ export default function PointsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
         <View style={styles.header}>
           <View style={styles.balanceRingWrapper}>
             <Svg width={184} height={184} style={styles.balanceRingSvg}>
@@ -203,7 +161,6 @@ export default function PointsScreen() {
           </View>
         </View>
 
-        {/* Saldo familiar */}
         <View style={styles.partnerCard}>
           <Text style={styles.partnerTitle}>Saldo familiar</Text>
           <View style={styles.partnerRow}>
@@ -219,7 +176,6 @@ export default function PointsScreen() {
           </View>
         </View>
 
-        {/* Tienda */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Gift size={20} color={theme.colors.primary} />
@@ -253,7 +209,6 @@ export default function PointsScreen() {
           })}
         </View>
 
-        {/* Historial */}
         {redemptions.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -288,7 +243,6 @@ export default function PointsScreen() {
         )}
       </ScrollView>
 
-      {/* Modal confirmación canje */}
       <Modal visible={!!pendingRedeem} animationType="fade" transparent>
         <View style={styles.overlayCenter}>
           <View style={styles.confirmModal}>
@@ -308,8 +262,8 @@ export default function PointsScreen() {
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setPendingRedeem(null)}>
                 <Text style={styles.cancelBtnText}>Cancelar</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.confirmBtn} onPress={confirmRedeem}>
-                <Text style={styles.confirmBtnText}>¡Canjear! 🎉</Text>
+              <TouchableOpacity style={[styles.confirmBtn, saving && { opacity: 0.5 }]} onPress={confirmRedeem} disabled={saving}>
+                <Text style={styles.confirmBtnText}>{saving ? 'Canjeando...' : '¡Canjear! 🎉'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -322,48 +276,26 @@ export default function PointsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
   content: { paddingHorizontal: 20 },
-
   header: { alignItems: 'center', marginBottom: 24, marginTop: 16 },
   balanceRingWrapper: { width: 184, height: 184, alignItems: 'center', justifyContent: 'center' },
   balanceRingSvg: { position: 'absolute' },
-  balanceCircle: {
-    width: 160, height: 160, borderRadius: 80,
-    backgroundColor: theme.colors.primary,
-    alignItems: 'center', justifyContent: 'center',
-    shadowColor: theme.colors.primary, shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3, shadowRadius: 16, elevation: 8,
-    borderWidth: 6, borderColor: 'rgba(255,255,255,0.2)',
-  },
+  balanceCircle: { width: 160, height: 160, borderRadius: 80, backgroundColor: theme.colors.primary, alignItems: 'center', justifyContent: 'center', shadowColor: theme.colors.primary, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 16, elevation: 8, borderWidth: 6, borderColor: 'rgba(255,255,255,0.2)' },
   balanceLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 14, fontWeight: '600', marginBottom: -4 },
   balanceAmount: { color: '#FFF', fontSize: 64, fontWeight: '900', letterSpacing: -2 },
   balancePts: { color: 'rgba(255,255,255,0.9)', fontSize: 16, fontWeight: '600', marginTop: -6 },
-
-  partnerCard: {
-    backgroundColor: '#FFF', borderRadius: 20, padding: 16, marginBottom: 32,
-    borderWidth: 1, borderColor: 'rgba(139,69,19,0.06)',
-  },
+  partnerCard: { backgroundColor: '#FFF', borderRadius: 20, padding: 16, marginBottom: 32, borderWidth: 1, borderColor: 'rgba(139,69,19,0.06)' },
   partnerTitle: { fontSize: 12, fontWeight: '700', color: theme.colors.textSecondary, textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center', marginBottom: 12 },
   partnerRow: { flexDirection: 'row', alignItems: 'center' },
   partnerCol: { flex: 1, alignItems: 'center' },
   dividerVertical: { width: 1, height: 30, backgroundColor: 'rgba(139,69,19,0.1)' },
   partnerName: { fontSize: 14, color: theme.colors.textSecondary, fontWeight: '500', marginBottom: 2 },
   partnerPts: { fontSize: 18, fontWeight: '800' },
-
   section: { marginBottom: 32 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 },
   sectionTitle: { fontSize: 20, fontWeight: '800', color: theme.colors.text, letterSpacing: -0.5 },
-
-  syncBtn: {
-    backgroundColor: 'rgba(139,69,19,0.03)', paddingVertical: 12, borderRadius: 12,
-    alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: 'rgba(139,69,19,0.1)',
-  },
+  syncBtn: { backgroundColor: 'rgba(139,69,19,0.03)', paddingVertical: 12, borderRadius: 12, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: 'rgba(139,69,19,0.1)' },
   syncBtnText: { color: theme.colors.textSecondary, fontWeight: '600', fontSize: 13 },
-
-  rewardCard: {
-    backgroundColor: '#FFF', borderRadius: 16, padding: 16, marginBottom: 12,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
-  },
+  rewardCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 16, marginBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
   rewardCardDisabled: { opacity: 0.75, backgroundColor: '#FAFAFA' },
   rewardInfo: { flex: 1, paddingRight: 16 },
   rewardName: { fontSize: 16, fontWeight: '700', color: theme.colors.text, marginBottom: 6 },
@@ -373,12 +305,7 @@ const styles = StyleSheet.create({
   redeemBtnDisabled: { backgroundColor: 'rgba(139,69,19,0.1)' },
   redeemText: { color: '#FFF', fontWeight: '700', fontSize: 14 },
   redeemTextDisabled: { color: theme.colors.textSecondary },
-
-  historyCard: {
-    backgroundColor: '#FFF', borderRadius: 16, overflow: 'hidden',
-    borderWidth: 1, borderColor: 'rgba(139,69,19,0.06)',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
-  },
+  historyCard: { backgroundColor: '#FFF', borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(139,69,19,0.06)', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
   historyItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 16 },
   historyItemBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(0,0,0,0.07)' },
   historyDot: { width: 10, height: 10, borderRadius: 5, flexShrink: 0 },
@@ -389,13 +316,8 @@ const styles = StyleSheet.create({
   historyMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
   historyPts: { fontSize: 12, fontWeight: '700', color: '#E53E3E', backgroundColor: '#FFF5F5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   historyTime: { fontSize: 12, color: theme.colors.textSecondary },
-
   overlayCenter: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 24 },
-  confirmModal: {
-    backgroundColor: '#FFF', borderRadius: 24, padding: 28, width: '100%', maxWidth: 340,
-    alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15, shadowRadius: 24, elevation: 10,
-  },
+  confirmModal: { backgroundColor: '#FFF', borderRadius: 24, padding: 28, width: '100%', maxWidth: 340, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 10 },
   confirmClose: { position: 'absolute', top: 16, right: 16, padding: 4 },
   confirmEmoji: { fontSize: 40, marginBottom: 8 },
   confirmTitle: { fontSize: 20, fontWeight: '700', color: theme.colors.text, marginBottom: 4 },
@@ -405,10 +327,6 @@ const styles = StyleSheet.create({
   confirmBtns: { flexDirection: 'row', gap: 12, width: '100%' },
   cancelBtn: { flex: 1, borderRadius: 14, paddingVertical: 14, alignItems: 'center', backgroundColor: 'rgba(139,69,19,0.08)' },
   cancelBtnText: { fontSize: 15, fontWeight: '600', color: theme.colors.textSecondary },
-  confirmBtn: {
-    flex: 1, borderRadius: 14, paddingVertical: 14, alignItems: 'center',
-    backgroundColor: theme.colors.primary,
-    shadowColor: theme.colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
-  },
+  confirmBtn: { flex: 1, borderRadius: 14, paddingVertical: 14, alignItems: 'center', backgroundColor: theme.colors.primary, shadowColor: theme.colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
   confirmBtnText: { fontSize: 15, fontWeight: '700', color: '#FFF' },
 });
