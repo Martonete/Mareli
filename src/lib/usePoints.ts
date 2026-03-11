@@ -14,7 +14,8 @@ export function usePoints() {
   const fetchBalances = useCallback(async () => {
     setLoading(true);
     try {
-      const [{ data: tasks }, { data: spends }] = await Promise.all([
+      const [{ data: profiles }, { data: tasks }, { data: spends }] = await Promise.all([
+        supabase.from('profiles').select('name'),
         supabase
           .from('tasks')
           .select('points_awarded, profiles!tasks_completed_by_profile_id_fkey(name)')
@@ -27,6 +28,13 @@ export function usePoints() {
 
       const earned: PointsBalances = {};
       const spent: PointsBalances = {};
+
+      // Inicializar todos los perfiles con 0
+      if (profiles) {
+        profiles.forEach((p: any) => {
+          if (p.name) { earned[p.name] = 0; spent[p.name] = 0; }
+        });
+      }
 
       if (tasks) {
         tasks.forEach((t: any) => {

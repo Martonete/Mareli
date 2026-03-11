@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal } from 'react-native';
 import { useProfileStore } from '../../src/store/useProfileStore';
 import { theme } from '../../src/constants/theme';
-import { LogOut, User, ChevronRight, Bell, Shield, Info } from 'lucide-react-native';
+import { supabase } from '../../src/lib/supabase';
+import { LogOut, ChevronRight, Bell, Shield, Info, RotateCcw } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
@@ -12,6 +13,8 @@ export default function SettingsScreen() {
   const router = useRouter();
 
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showNewWeek, setShowNewWeek] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const handleLogout = () => {
     setShowLogoutConfirm(true);
@@ -21,6 +24,22 @@ export default function SettingsScreen() {
     setShowLogoutConfirm(false);
     await clearProfile();
     router.replace('/profile-select');
+  };
+
+  const confirmNewWeek = async () => {
+    setResetting(true);
+    try {
+      await Promise.all([
+        supabase.from('tasks').delete().neq('id', ''),
+        supabase.from('reward_redemptions').delete().neq('id', ''),
+        supabase.from('shopping_items').delete().neq('id', ''),
+      ]);
+      alert('¡Nueva semana iniciada! Todo fue reiniciado a 0.');
+    } catch (err: any) {
+      alert('Error al reiniciar: ' + err.message);
+    }
+    setResetting(false);
+    setShowNewWeek(false);
   };
 
   const profileColor = theme.colors.primary;
@@ -77,11 +96,37 @@ export default function SettingsScreen() {
         ))}
       </View>
 
+      {/* Nueva semana */}
+      <TouchableOpacity style={styles.newWeekBtn} onPress={() => setShowNewWeek(true)} activeOpacity={0.8}>
+        <RotateCcw size={18} color="#FFF" />
+        <Text style={styles.newWeekText}>Comenzar nueva semana</Text>
+      </TouchableOpacity>
+
       {/* Logout */}
       <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.8}>
         <LogOut size={18} color={theme.colors.error} />
         <Text style={styles.logoutText}>Cambiar perfil</Text>
       </TouchableOpacity>
+
+      {/* Modal confirmar nueva semana */}
+      <Modal visible={showNewWeek} animationType="fade" transparent>
+        <View style={styles.overlayCenter}>
+          <View style={styles.confirmModal}>
+            <Text style={styles.confirmTitle}>Comenzar nueva semana</Text>
+            <Text style={styles.confirmSub}>
+              Se eliminarán todas las tareas, canjes y artículos de compra. Los puntos volverán a 0 para ambos. ¿Continuar?
+            </Text>
+            <View style={styles.confirmBtns}>
+              <TouchableOpacity style={styles.cancelConfirmBtn} onPress={() => setShowNewWeek(false)}>
+                <Text style={styles.cancelConfirmText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.deleteConfirmBtn, resetting && { opacity: 0.5 }]} onPress={confirmNewWeek} disabled={resetting}>
+                <Text style={styles.deleteConfirmText}>{resetting ? 'Reiniciando...' : 'Reiniciar todo'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Modal confirmar cambio de perfil */}
       <Modal visible={showLogoutConfirm} animationType="fade" transparent>
@@ -142,6 +187,12 @@ const styles = StyleSheet.create({
   menuInfo: { flex: 1 },
   menuLabel: { fontSize: 15, fontWeight: '600', color: theme.colors.text },
   menuSub: { fontSize: 12, color: theme.colors.textSecondary, marginTop: 2, fontWeight: '400' },
+  newWeekBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+    backgroundColor: theme.colors.primary, borderRadius: 14, paddingVertical: 14, marginBottom: 12,
+    shadowColor: theme.colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
+  },
+  newWeekText: { fontSize: 15, fontWeight: '700', color: '#FFF' },
   logoutBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
     borderWidth: 1.5, borderColor: theme.colors.error,
