@@ -43,13 +43,22 @@ export default function ShoppingScreen() {
 
   const handleAddItem = async () => {
     if (!newItem.trim() || !activeProfile) return;
-    const { error } = await supabase.from('shopping_items').insert({
-      name: newItem.trim(),
-      status: 'pending',
+    // Soporta múltiples items separados por línea
+    const lines = newItem.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length === 0) return;
+
+    const rows = lines.map(name => ({
+      name,
+      status: 'pending' as const,
       created_by_profile_id: activeProfile.id,
-    });
-    if (error) { Alert.alert('Error', 'No se pudo agregar el item'); return; }
-    notifyOtherUser(activeProfile.id, '🛒 Lista de compras', `${activeProfile.name.split(' ')[0]} agregó "${newItem.trim()}" a la lista.`);
+    }));
+    const { error } = await supabase.from('shopping_items').insert(rows);
+    if (error) { Alert.alert('Error', 'No se pudo agregar'); return; }
+
+    const label = lines.length === 1
+      ? `"${lines[0]}"`
+      : `${lines.length} items`;
+    notifyOtherUser(activeProfile.id, '🛒 Lista de compras', `${activeProfile.name.split(' ')[0]} agregó ${label} a la lista.`);
     setNewItem('');
     fetchItems();
   };
@@ -165,23 +174,26 @@ export default function ShoppingScreen() {
         <Text style={styles.headerTitle}>Lista de Compras</Text>
       </View>
 
-      {/* Input fijo arriba */}
+      {/* Input tipo bloc de notas */}
       <View style={styles.inputCard}>
-        <TextInput
-          style={styles.input}
-          placeholder="¿Qué falta comprar?"
-          placeholderTextColor="rgba(139,69,19,0.35)"
-          value={newItem}
-          onChangeText={setNewItem}
-          onSubmitEditing={handleAddItem}
-          returnKeyType="done"
-        />
+        <View style={styles.inputLines}>
+          <TextInput
+            style={styles.input}
+            placeholder={"Escribí lo que falta...\nUn item por línea"}
+            placeholderTextColor="rgba(139,69,19,0.3)"
+            value={newItem}
+            onChangeText={setNewItem}
+            multiline
+            textAlignVertical="top"
+          />
+        </View>
         <TouchableOpacity
           style={[styles.addBtn, !newItem.trim() && styles.addBtnDisabled]}
           onPress={handleAddItem}
           disabled={!newItem.trim()}
         >
-          <Plus size={20} color="#FFF" />
+          <Plus size={18} color="#FFF" />
+          <Text style={styles.addBtnLabel}>Agregar</Text>
         </TouchableOpacity>
       </View>
 
@@ -273,24 +285,30 @@ const styles = StyleSheet.create({
   },
 
   inputCard: {
-    flexDirection: 'row', gap: 10, marginHorizontal: 16,
-    marginTop: 10, marginBottom: 6, padding: 6, paddingLeft: 16,
+    marginHorizontal: 16, marginTop: 10, marginBottom: 6,
     backgroundColor: '#FFF', borderRadius: 16,
     borderWidth: 1, borderColor: 'rgba(139,69,19,0.1)',
-    alignItems: 'center',
     shadowColor: '#8B4513', shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
+    overflow: 'hidden',
+  },
+  inputLines: {
+    borderBottomWidth: 1, borderBottomColor: 'rgba(139,69,19,0.08)',
   },
   input: {
-    flex: 1, fontSize: 15, color: theme.colors.text,
-    paddingVertical: 10,
+    fontSize: 15, color: theme.colors.text,
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
+    minHeight: 80, maxHeight: 140,
+    textAlignVertical: 'top',
+    lineHeight: 24,
   },
   addBtn: {
-    width: 42, height: 42, borderRadius: 14,
-    backgroundColor: theme.colors.primary,
-    alignItems: 'center', justifyContent: 'center',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingVertical: 12,
+    backgroundColor: theme.colors.primary, borderRadius: 0,
   },
   addBtnDisabled: { opacity: 0.4 },
+  addBtnLabel: { color: '#FFF', fontSize: 14, fontWeight: '700' },
 
   list: { paddingHorizontal: 16, paddingTop: 8 },
 
