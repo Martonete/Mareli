@@ -7,7 +7,7 @@ import { useProfileStore } from '../../src/store/useProfileStore';
 import { theme } from '../../src/constants/theme';
 import { supabase } from '../../src/lib/supabase';
 import { TaskWithDetails, TaskType } from '../../src/types/database.types';
-import { Check, Plus, X, CheckCircle } from 'lucide-react-native';
+import { Check, Plus, X, CheckCircle, Trash2 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { format } from 'date-fns';
 import { notifyOtherUser } from '../../src/lib/notifications';
@@ -28,6 +28,7 @@ export default function TasksScreen() {
   const [newTypeName, setNewTypeName] = useState('');
   const [newTypePoints, setNewTypePoints] = useState('');
   const [pendingDeleteTask, setPendingDeleteTask] = useState<TaskWithDetails | null>(null);
+  const [pendingClear, setPendingClear] = useState(false);
 
   const fetchTasks = useCallback(async () => {
     const { data, error } = await supabase
@@ -118,24 +119,24 @@ export default function TasksScreen() {
         alert('No hay suficientes perfiles para asignar a "Ambos"');
         return;
       }
-      const halfPoints = Math.floor((taskToComplete.task_types?.default_points ?? 0) / 2);
-      
+      const fullPoints = taskToComplete.task_types?.default_points ?? 0;
+
       // Actualizamos la original a favor de Profile 1
       await supabase.from('tasks').update({
         status: 'completed',
         completed_by_profile_id: profiles[0].id,
         completed_at: new Date().toISOString(),
-        points_awarded: halfPoints,
+        points_awarded: fullPoints,
       }).eq('id', taskToComplete.id);
 
-      // Creamos clon para Profile 2
+      // Creamos clon para Profile 2 con los mismos puntos
       await supabase.from('tasks').insert({
         task_type_id: taskToComplete.task_type_id,
         status: 'completed',
         created_by_profile_id: taskToComplete.created_by_profile_id,
         completed_by_profile_id: profiles[1].id,
         completed_at: new Date().toISOString(),
-        points_awarded: halfPoints,
+        points_awarded: fullPoints,
         target_date: taskToComplete.target_date,
         notes: taskToComplete.notes ? `(Compartida) ${taskToComplete.notes}` : '(Compartida)',
       });
@@ -272,6 +273,12 @@ export default function TasksScreen() {
     if (!error) fetchTasks();
   };
 
+  const confirmClearCompleted = async () => {
+    const { error } = await supabase.from('tasks').delete().eq('status', 'completed');
+    setPendingClear(false);
+    if (!error) fetchTasks();
+  };
+
   const FILTERS: { key: 'all' | 'pending' | 'completed'; label: string }[] = [
     { key: 'all', label: 'Todas' },
     { key: 'pending', label: 'Pendientes' },
@@ -283,9 +290,16 @@ export default function TasksScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Tareas</Text>
-        <TouchableOpacity style={[styles.addBtn, { backgroundColor: profileColor }]} onPress={() => setIsModalVisible(true)}>
-          <Plus size={22} color="#FFF" />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          {tasks.some(t => t.status === 'completed') && (
+            <TouchableOpacity style={[styles.addBtn, { backgroundColor: '#EF4444' }]} onPress={() => setPendingClear(true)}>
+              <Trash2 size={20} color="#FFF" />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={[styles.addBtn, { backgroundColor: profileColor }]} onPress={() => setIsModalVisible(true)}>
+            <Plus size={22} color="#FFF" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Filters */}
@@ -496,6 +510,26 @@ export default function TasksScreen() {
               </TouchableOpacity>
               <TouchableOpacity style={[styles.assignBtnBoth, { backgroundColor: '#EF4444' }]} onPress={confirmDeleteTask}>
                 <Text style={styles.assignBtnBothText}>Eliminar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal Confirmar Limpiar Completadas */}
+      <Modal visible={pendingClear} animationType="fade" transparent>
+        <View style={styles.overlayCenter}>
+          <View style={styles.confirmModal}>
+            <Text style={styles.confirmTitle}>Limpiar tareas</Text>
+            <Text style={styles.confirmSub}>
+              ¿Eliminar todas las tareas completadas ({tasks.filter(t => t.status === 'completed').length})?
+            </Text>
+            <View style={styles.confirmBtns}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setPendingClear(false)}>
+                <Text style={styles.cancelBtnText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.assignBtnBoth, { backgroundColor: '#EF4444' }]} onPress={confirmClearCompleted}>
+                <Text style={styles.assignBtnBothText}>Limpiar</Text>
               </TouchableOpacity>
             </View>
           </View>
